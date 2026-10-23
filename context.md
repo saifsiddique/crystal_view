@@ -334,7 +334,8 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 4. **PXRD multiplicities follow pymatgen's merging**: pymatgen merges peaks at the same 2θ, and `m` counts every ± hkl member merged into that peak. Wavelength is pymatgen's `CuKa` = 1.54184 Å (the weighted Kα average), stored as `pxrd.wavelength`.
 5. **`TEMCalculator` is a valid kinematic reference.** Its `zone_axis_filter` applies the Weiss law with the beam direction. For Si [110], (002) comes out as ~6e-33 (forbidden) and (1,−1,1) is the strongest spot (1.0).
 6. `wavelength_rel()` confirms the §5.5 values: 200 kV → 0.0250793 Å, 300 kV → 0.0196875 Å.
-7. **Svelte/TS notes:** `tsconfig.core.json` has `types: []` and `lib: ["ES2023"]`; keep new `core/` files inside `src/core/` so the guard applies. The eslint `no-restricted-*` rules for `core/` list `three`, `svelte`, `node:*`, `render/`, `ui/` and DOM globals; extend them if `core/` ever needs another boundary.
+7. **Line endings (Windows):** with `core.autocrlf=true`, a fresh clone used to get CRLF files, which broke the fixture SHA-256 test and Prettier's `format:check`. `.gitattributes` now pins `* text=auto eol=lf` and marks `app/tests/fixtures/**` as `-text` (never converted, because the tests hash those bytes). Found by cloning into a scratch folder and following §10; re-do that check after changing git or CI setup.
+8. **Svelte/TS notes:** `tsconfig.core.json` has `types: []` and `lib: ["ES2023"]`; keep new `core/` files inside `src/core/` so the guard applies. The eslint `no-restricted-*` rules for `core/` list `three`, `svelte`, `node:*`, `render/`, `ui/` and DOM globals; extend them if `core/` ever needs another boundary.
 
 ---
 
