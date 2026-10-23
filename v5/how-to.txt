@@ -1,0 +1,4 @@
+open anaconda prompt; navigate to the folder with all the files
+type 'python -m http.server' in the prompt
+open browser, and go to: http://localhost:8000
+The webpage will open

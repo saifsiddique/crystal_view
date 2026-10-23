@@ -1,0 +1,4 @@
+open anaconda prompt; navigate to the folder with these files
+type 'python custom_server.py' in the prompt. It will start a local http server.
+open browser, and go to: http://localhost:8000
+The webpage will open

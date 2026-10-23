@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Crystal Viewer and Diffraction Pattern Simulator</title>
+    <script src="https://cdn.canvasjs.com/ga/canvasjs.min.js"></script>
+    <script async src="index.js"></script>
+    <link rel="stylesheet" href="styles.css"/>
+  </head>
+  <body>
+    <h1>Crystal Viewer and Diffraction Pattern Simulator</h1>
+    
+    <p id="status">Upload a CIF file to begin.</p>
+    <input type="file" id="cifFile" accept=".cif">
+  
+    <div class="container">
+      <!-- Left Box: Crystal Structure Viewer -->
+      <div class="box" id="structureViewer">
+        <h2>Crystal Structure</h2>
+        <canvas id="structureCanvas"></canvas> <!-- For Three.js -->
+      </div>
+  
+      <!-- Right Box: Diffraction Pattern -->
+      <div class="box" id="diffractionPattern">
+        <h2>Diffraction Pattern</h2>
+        <div id="diffractionCanvas"></div> <!-- For Chart.js scatter plot -->
+      </div>
+    </div>
+  
+    <script async src="index.js"></script>
+  </body>
+</html>

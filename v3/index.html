@@ -1,0 +1,47 @@
+<html>
+  <head>
+    <title>Diffraction Pattern Simulator for Crystalline Material</title>
+    <script src="math.js" type="text/javascript"></script>
+    <script src="https://cdn.canvasjs.com/ga/canvasjs.min.js"></script>
+    <script src="idontknow.js"defer></script>
+    <link rel="stylesheet" href="index.css"/>
+    <script src="https://cdn.plot.ly/plotly-3.0.0.min.js" charset="utf-8"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js'></script>
+  </head>
+  <body>
+    
+    <script src="https://cdn.canvasjs.com/ga/canvasjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/14.0.1/math.js"></script>
+    <h1>Diffraction Pattern Simulator for Crystalline Material</h1>
+    <p id="status">Upload a CIF file to begin.</p>
+    <input type="file" id="cifFile" accept=".cif">
+    <div id="message"></div>
+    <pre id="file-content"></pre>
+
+    <canvas id="myCanvas" width="300" height="150"></canvas>
+    <label>Orientation: </label>
+    <input id="myText">
+    <button id="mySubmit">Input</button>
+    
+    <div class="container">
+      <!-- Left Box: Crystal Structure Viewer -->
+      <div class="box" id="structureViewer">
+        <h2>Crystal Structure</h2>
+        <div id="structureCanvas"></div> <!-- For Three.js -->
+      </div>
+      
+  
+      <!-- Right Box: Diffraction Pattern -->
+      <div class="box" id="diffractionPattern">
+        <h2>Diffraction Pattern</h2>
+        <div id="diffractionCanvas"></div> <!-- For Chart.js scatter plot -->
+      </div>
+    </div>
+  
+    <script>
+        console.log(document.getElementById("myElement"));
+    </script>
+    <script async src="readciffile.js"></script>
+    <script src="idontknow.js"></script>
+  </body>
+</html>
