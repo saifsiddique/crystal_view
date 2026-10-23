@@ -1,0 +1,12 @@
+# Check out text as LF on every platform (Windows autocrlf would otherwise break Prettier's
+# format:check on a fresh clone).
+* text=auto eol=lf
+
+# The fixture tests hash these files byte for byte (app/tests/unit/fixtures.test.ts), so git must
+# never convert their line endings.
+app/tests/fixtures/** -text
+
+# Generated or binary assets.
+*.ico binary
+*.png binary
+*.wasm binary
