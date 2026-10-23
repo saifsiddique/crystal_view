@@ -11,3 +11,6 @@ export class LatticeError extends CrystalLensError {}
 
 /** A matrix that cannot be inverted. */
 export class SingularMatrixError extends CrystalLensError {}
+
+/** A CIF that cannot be turned into a structure (missing cell, no atoms, ...). */
+export class CifError extends CrystalLensError {}

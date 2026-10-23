@@ -19,7 +19,7 @@
 |---|---|---|---|
 | M0 | Foundation & tooling | – | ✅ done 2026-10-23 (see §7.M0 and §10) |
 | M1 | Lattice & linear-algebra core | M0 | ✅ done 2026-10-23 (see §7.M1) |
-| M2 | CIF parser & writer | M0 | ☐ |
+| M2 | CIF parser & writer | M0 | ✅ done 2026-10-23 (see §7.M2) |
 | M3 | Symmetry & Crystal model | M1, M2 | ☐ |
 | M4 | Scattering-factor tables | M0 | ☐ |
 | M5 | 3D structure renderer | M3 | ☐ |
@@ -397,12 +397,32 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
    - Title and formula.
 3. **Multiple data blocks:** return them all; the UI (M14) asks the user to choose.
 4. `write.ts` exports a Crystal back to a valid CIF (P1-expanded, or the asymmetric unit with symops).
-5. `scripts/cod_robustness.ts` downloads (through the M13 proxy, or a local folder) N random COD IDs, parses them, and logs failures by category.
+5. Robustness run (as built): `scripts/fetch_cod_sample.py` downloads N random COD CIFs into the gitignored `tests/cod_sample/`; `npm run test:cod` parses them and writes `_report.txt` (failures and warnings by category); `scripts/check_cod_sample.py` cross-checks our output against pymatgen. (The original plan of a `cod_robustness.ts` script was replaced by this: Node cannot run the extension-less TS imports directly, and a vitest test is simpler.)
 
 **Accept when:**
 - Unit tests cover each grammar feature, and all fixtures parse.
 - Parse → write → parse round trips to the same Crystal.
 - The COD robustness run over at least 500 files passes at least 98%.
+
+#### M2 status: ✅ done 2026-10-23
+
+**Acceptance results:** 41 grammar/mapping tests (`cif.test.ts`) and 19 corpus tests (`cif-corpus.test.ts`). All 7 fixture CIFs parse to the cell, declared space-group number and operation count that pymatgen/spglib report, and round-trip. The 18 CIFs in `Documents/git/simulation/cifs` (ICSD exports, CrystalMaker and VESTA output, pymatgen output, hand-edited files) all parse and round-trip (run with `CRYSTALLENS_EXTRA_CIFS=<dir>`). **COD random sample: 599/600 parsed (99.83%)**, every success round-trips exactly; the one failure (COD 2217640) is a real entry whose atom loop contains only `. . .` placeholders, i.e. correctly rejected. Cross-check against pymatgen's low-level CIF reader on the same 600 files: cell, atom count, coordinates and element agree everywhere (596 files compared, 3 unreadable by pymatgen); the single disagreement (8104996, symop count) is pymatgen picking the wrong one of two symop loops. Mutation-checked: breaking the quote rule, the B to U conversion, label case handling and loop selection each fail tests. Truncation fuzzing (2,000+ cut-up real files) only ever raises `CifError`; 20,000 atoms parse in well under a second.
+
+**API (`core/cif`, pure):**
+- `parseCif(text): BlockOutcome[]` returns one `{name, structure?, error?, warnings}` per data block (M14 shows a chooser when more than one has a structure). `parseFirstStructure(text)` returns the first block that maps. Both throw `CifError` only if there is no `data_` block / no usable block.
+- `CifStructure` = `{name, title?, formula?, cell: Cell, spaceGroup: {hm?, hall?, number?}, symops: string[], atoms: CifAtom[], ids: {cod?, icsd?}}`. `CifAtom` = `{label, element, isotope?, typeSymbol?, x, y, z, occupancy, uiso?, adpType?, aniso?: {U11..U23}, disorderGroup?}`. Symops are the strings as written (`'-x+1/2, y, z'`); **M3 parses them**. Nothing is expanded or de-duplicated here.
+- `writeCif(structure)` writes exactly what the structure holds (full-precision numbers; quoting only where needed; no symop loop if there are none). For a P1 export M3 passes a structure whose symops are `['x, y, z']`. Parse, write, parse is exact.
+- Lower layers: `tokenize`, `parseCifDocument` (blocks of items and loops), `parseNumeric('0.9344(13)') = {value, su}`, `elementFromSymbol`.
+- New: `core/elements.ts` (`ELEMENT_SYMBOLS`, `isElementSymbol`, `atomicNumber`; M4 attaches the data) and `CifError` in `core/errors.ts`.
+
+**Things M2 found that later modules must know:**
+1. **Quote rule matters.** CIF 1.1 ends a quoted string only at a matching quote followed by whitespace; The hand-edited VESTA file writes `'P6/mm'm''`. The H-M string for that file reads `P6/mm'm'`, i.e. **do not trust `spaceGroup.hm` blindly in M3: fall back to the symops, and use the IT number when the H-M symbol is not recognised.**
+2. **Duplicate symops occur** (the pymatgen-written SrTiO3 CIF lists each operation twice; `symops.length` is 96 for 48 distinct operations). M3 must de-duplicate operations before counting them.
+3. **Some CIFs have several symop or atom loops** (e.g. COD 8104996); we take the first. Disordered structures keep `disorderGroup` and all partial occupancies; M3/M6 decide how to show them.
+4. **Element detection:** `type_symbol` first (case-insensitive: `Fe3+`, `O2-`, `CU`), else the label with a lower-case-second-letter rule (`Co1` = Co, `CO1` = C, `Site1` = S as a last resort); `D`/`T` become H with `isotope`. `typeSymbol` is stored only when it differs from the element (so `Fe3+` keeps its oxidation state for M6 ionic radii). Atoms with `calc_flag dum` are dropped; unreadable atoms are skipped with a warning.
+5. Uncertainties like `0.9344(13)` are parsed but dropped from the structure (coordinates are plain numbers); `-0.000` becomes `0`. B_iso and B_ij are converted to U (divide by 8 pi^2). Cartesian-only CIFs are converted assuming a || x, c* || z (the same frame as ours) and give a warning.
+6. Not supported (reported, not fatal): CIF2 lists/tables/triple quotes, text-field line folding, magnetic and modulated CIFs (their extra loops are ignored).
+7. The default `npm test` also runs the COD-sample and user-CIF tests when `tests/cod_sample/` or `CRYSTALLENS_EXTRA_CIFS` exist; on CI neither does, so only the fixtures run there. ICSD files are not committed (licence).
 
 ---
 
