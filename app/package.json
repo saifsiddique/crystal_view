@@ -1,0 +1,46 @@
+{
+  "name": "crystallens-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "predev": "node scripts/ensure-wasm.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/ensure-wasm.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:wasm": "wasm-pack build ../kernels --target web --release --out-dir ../app/src/wasm --out-name kernels",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.core.json && tsc -p tsconfig.node.json && tsc -p tsconfig.test.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rust": "cargo test --manifest-path ../kernels/Cargo.toml",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.64.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^24.19.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-svelte": "^3.23.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^3.5.2",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2"
+  }
+}

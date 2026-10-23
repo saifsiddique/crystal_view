@@ -1,0 +1,19 @@
+[package]
+name = "kernels"
+version = "0.1.0"
+edition = "2024"
+description = "Heavy numerical kernels for CrystalLens (Bloch-wave diffraction etc.), compiled to WASM."
+publish = false
+
+[lib]
+# cdylib -> .wasm for the browser; rlib -> native `cargo test` and a future Tauri build (context.md M15).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
