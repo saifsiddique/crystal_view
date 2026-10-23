@@ -2,42 +2,12 @@
 // safety net itself: later modules compare their output against these files, so the files must be
 // internally consistent, tied to their CIFs, and obey the frame conventions of context.md 5.2.
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { APP_NAME } from '../../src/core/meta';
+import { fixtureDir as dir, fixtures, names } from './helpers/fixtures';
 
 type Mat3 = number[][];
-interface Fixture {
-  name: string;
-  source: { cod_id: number; cif: string; sha256: string };
-  cell: { a: number; b: number; c: number; alpha: number; beta: number; gamma: number };
-  volume: number;
-  metric: Mat3;
-  recip_metric: Mat3;
-  matrix_standard: Mat3;
-  recip_matrix_standard: Mat3;
-  space_group: { declared_number: number | null; detected_number: number; n_operations: number };
-  unit_cell: { n_sites: number; counts: Record<string, number> };
-  reflections: { rows: number[][] };
-  zones: Record<string, string[]>;
-  tem: { voltage_kV: number; wavelength: number; zones: Record<string, number[][]> };
-  pxrd: { wavelength: number; two_theta_range: [number, number]; peaks: PxrdPeak[] };
-}
-interface PxrdPeak {
-  two_theta: number;
-  intensity: number;
-  d: number;
-  hkls: { hkl: number[]; m: number }[];
-}
-
-const dir = fileURLToPath(new URL('../fixtures/', import.meta.url));
-const names = readdirSync(`${dir}json`)
-  .filter((f) => f.endsWith('.json'))
-  .map((f) => f.replace(/\.json$/, ''))
-  .sort();
-const load = (name: string): Fixture => JSON.parse(readFileSync(`${dir}json/${name}.json`, 'utf8'));
-const fixtures = Object.fromEntries(names.map((n) => [n, load(n)]));
 
 const mul = (a: Mat3, b: Mat3): Mat3 =>
   a.map((_, i) => b[0].map((_, j) => a[i].reduce((s, _, k) => s + a[i][k] * b[k][j], 0)));

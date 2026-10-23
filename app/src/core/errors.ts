@@ -1,0 +1,13 @@
+/** Typed errors thrown by `core/` (context.md 5.3). The UI catches these and shows a message. */
+export class CrystalLensError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/** A unit cell that cannot describe a real lattice (non-positive length, impossible angles). */
+export class LatticeError extends CrystalLensError {}
+
+/** A matrix that cannot be inverted. */
+export class SingularMatrixError extends CrystalLensError {}

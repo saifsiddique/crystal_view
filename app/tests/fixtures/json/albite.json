@@ -1,6 +1,6 @@
 {
  "name": "albite",
- "note": "triclinic C-1, all angles != 90, centred setting",
+ "note": "triclinic, declared in centred setting C-1; the only fixture where legacy v6 sin(gamma) bug changes the matrix",
  "source": {
   "cod_id": 9000525,
   "cif": "cifs/albite.cif",

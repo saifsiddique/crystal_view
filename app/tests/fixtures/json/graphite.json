@@ -1,6 +1,6 @@
 {
  "name": "graphite",
- "note": "hexagonal P63/mmc, gamma=120 (v6 lattice bug regression)",
+ "note": "hexagonal P63/mmc, gamma=120; [110] is parallel to the (110) normal, [100] is not to (100)",
  "source": {
   "cod_id": 9011577,
   "cif": "cifs/graphite.cif",

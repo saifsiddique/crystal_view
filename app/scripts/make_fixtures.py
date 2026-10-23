@@ -57,9 +57,9 @@ FIXTURES: dict[str, tuple[int, str]] = {
     "Si": (9008565, "cubic diamond, Fd-3m origin choice 1 (':1'), AMCSD-style CIF"),
     "NaCl": (1000041, "cubic rock salt, Fm-3m, older ICSD-style CIF tags"),
     "rutile": (9004141, "tetragonal P42/mnm, atoms on special positions"),
-    "graphite": (9011577, "hexagonal P63/mmc, gamma=120 (v6 lattice bug regression)"),
+    "graphite": (9011577, "hexagonal P63/mmc, gamma=120; [110] is parallel to the (110) normal, [100] is not to (100)"),
     "ZrO2_baddeleyite": (9007485, "monoclinic P21/c, beta != 90"),
-    "albite": (9000525, "triclinic C-1, all angles != 90, centred setting"),
+    "albite": (9000525, "triclinic, declared in centred setting C-1; the only fixture where legacy v6 sin(gamma) bug changes the matrix"),
     "olivine_partial": (9006875, "orthorhombic Pbnm, Mg/Fe mixed occupancy (<1)"),
 }
 
