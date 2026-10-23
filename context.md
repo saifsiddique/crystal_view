@@ -18,7 +18,7 @@
 | Module | Title | Depends on | Status |
 |---|---|---|---|
 | M0 | Foundation & tooling | – | ✅ done 2026-10-23 (see §7.M0 and §10) |
-| M1 | Lattice & linear-algebra core | M0 | ☐ |
+| M1 | Lattice & linear-algebra core | M0 | ✅ done 2026-10-23 (see §7.M1) |
 | M2 | CIF parser & writer | M0 | ☐ |
 | M3 | Symmetry & Crystal model | M1, M2 | ☐ |
 | M4 | Scattering-factor tables | M0 | ☐ |
@@ -184,7 +184,7 @@ strFac_app/
 - `B` = (M⁻¹)ᵀ, whose columns are a*, b*, c*, so that g_cart = B · (h,k,l)ᵀ.
 - Metric tensor `G` = MᵀM; reciprocal metric G* = G⁻¹.
 - **Direction [uvw]:** cartesian = M·uvw. **Plane normal (hkl):** cartesian = B·hkl.
-- Conversions: **hkl ∥ G·uvw**, **uvw ∥ G*·hkl**. They're only numerically equal in cubic cells; never mix them up (this was v6 bug #4).
+- Conversions: **hkl ∥ G·uvw**, **uvw ∥ G*·hkl**. They coincide numerically in cubic cells, and for special directions elsewhere (hexagonal [110] ∥ the normal of (110), but [100] is **not** the normal of (100): it is the normal of (2 −1 0)), so a test that happens to pass for one pair proves nothing; never mix them up (this was v6 bug #4).
 - Weiss zone law: (hkl) belongs to zone [uvw] ⇔ hu + kv + lw = 0, an exact integer test. More generally, hu + kv + lw = n gives Laue zone n.
 - Fractional coordinates are wrapped to [0, 1) with tolerance ε = 1e-4 when stored in the asymmetric unit or expanded cell.
 
@@ -268,7 +268,7 @@ It's a CIF-to-Plotly 3D view with a live zone-axis projection of |F|², drawn wi
 - The debounced camera-change → index update loop → M7.
 
 **Known bugs (each needs a regression test):**
-1. In `getDirectLatticeVectors`, `Math.sin(gamma)` takes degrees. It must use `gammaRad`; otherwise every non-orthogonal cell is wrong.
+1. In `getDirectLatticeVectors`, `Math.sin(gamma)` takes degrees; it must use `gammaRad`. It only corrupts `c_y = c (cos α − cos β cos γ) / sin γ`, so it is **harmless whenever the numerator vanishes** (cubic, tetragonal, hexagonal, and monoclinic with unique axis b: M1 verified v6 gives the correct matrix for Si, NaCl, rutile, graphite and ZrO₂) and **wrong for triclinic cells** (albite: up to ~0.15 Å in the matrix). An earlier version of this file wrongly said all non-orthogonal cells were affected.
 2. Symmetry expansion doesn't de-duplicate, so atoms on special positions are counted several times.
 3. F uses unit weights: there's no f(s), occupancy or Debye–Waller factor.
 4. The [uvw] direction and the (hkl) plane normal are confused, both in the input label and in `getMillerIndicesFromCamera`.
@@ -320,9 +320,9 @@ Each module lists **Goal · Inputs/Outputs · Tasks · Acceptance criteria · Ef
 | `Si` | 9008565 | cubic diamond, Fd-3m **origin choice 1** (`:1`), AMCSD-style tags |
 | `NaCl` | 1000041 | cubic Fm-3m, older ICSD-style tags |
 | `rutile` | 9004141 | tetragonal P4₂/mnm, special positions |
-| `graphite` | 9011577 | hexagonal P6₃/mmc, γ = 120° (v6 bug 1 regression) |
+| `graphite` | 9011577 | hexagonal P6₃/mmc, γ = 120°; [110] ∥ (110) normal but [100] ∦ (100) |
 | `ZrO2_baddeleyite` | 9007485 | monoclinic P2₁/c, β ≠ 90° |
-| `albite` | 9000525 | triclinic, declared in the centred setting `C -1` |
+| `albite` | 9000525 | triclinic, declared in the centred setting `C -1`; the **only** fixture where v6's `sin(gamma)` bug changes the matrix |
 | `olivine_partial` | 9006875 | orthorhombic Pbnm, Mg/Fe mixed occupancy (~0.54/0.46) |
 
 Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `volume`, `metric` G and `recip_metric` G*, `matrix_standard` / `recip_matrix_standard` (columns = a,b,c / a*,b*,c* in the §5.2 frame), `space_group` (`declared_number`, `declared_hm`, `detected_number`, `detected_symbol`, `crystal_system`, `n_operations`), `unit_cell` (`n_sites`, `counts`, `atoms[{species:{El:occ}, frac}]`), `reflections` (`rows` of `[h,k,l,d,F2]` for |h|,|k|,|l| ≤ 3, 342 rows), `zones` (Weiss lists for [001], [110], [111]), `tem` (200 kV: λ plus ZOLZ rows `[h,k,l,d,I]` for [001] and [110]), and `pxrd` (Cu Kα, 10–90° 2θ, peaks with `two_theta`, `intensity`, `d`, `hkls[{hkl,m}]`).
@@ -354,7 +354,27 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 **Accept when:**
 - For every fixture, `cellToMatrix` matches `matrix_standard`, `reciprocal` matches `recip_matrix_standard`, and `metric`/`volume`/`dSpacing` match `metric`, `volume` and `reflections` to 1e-6, including hexagonal graphite (v6 bug 1). Do not compare Cartesian vectors against pymatgen directly (§7.M0, finding 1).
 - Round trips `uvw → cart → nearestUvw` are exact for indices ≤ 6.
-- In hexagonal graphite, [110] and (110) are correctly *not* parallel.
+- In hexagonal graphite, [100] and the normal of (100) are 30° apart, [100] is parallel to the normal of (2 −1 0), and [110] **is** parallel to the normal of (110). (An earlier version of this line said [110] and (110) are not parallel; that was wrong, see the status block.)
+
+#### M1 status: ✅ done 2026-10-23
+
+**Acceptance results:** 148 unit tests pass (76 in `lattice.test.ts`, 13 in `math.test.ts`, 59 M0 fixture-integrity tests). For all 7 fixtures: `M`, `B`, `G`, `G*`, `volume` match the fixture to 1e-7 or better, all 342 d-spacings match, the Weiss zone lists are reproduced exactly, and every coprime triple with |index| ≤ 6 (about 1,800) round-trips through `cartesianToNearestUvw` / `cartesianToNearestHkl` with the right sign and an angular deviation below 1e-9°. Mutation checks: reintroducing v6's `sin(gamma)` bug fails only the albite tests; swapping `B` for `M` in `hklToCart`, or `G` for `G*` in `uvwToHkl`, fails 20 and 8 tests respectively.
+
+**API (all pure; import from `core/lattice` unless noted):**
+- `buildLattice(cell: Cell): Lattice` computes everything once: `{cell, M, Minv, B, G, Gstar, volume}`. **Pass the `Lattice` around**; every function below takes it first. Primitives `cellToMatrix(cell)`, `reciprocal(M)`, `metric(M)`, `volume(M)` also exist. `Cell` lives in `core/crystal.ts` (M3 extends that file).
+- Coordinates: `fracToCart`, `cartToFrac`, `uvwToCart` (= M·uvw, length in Å), `hklToCart` (= B·hkl, |g| = 1/d).
+- Conversions (real-valued, not normalised, not integer): `uvwToHkl` (= G·uvw), `hklToUvw` (= G*·hkl).
+- Measurements: `dSpacing(lat, hkl)`, `directionLength(lat, uvw)`, `angleBetweenDirections`, `angleBetweenPlanes`, `angleDirectionToPlaneNormal(lat, uvw, hkl)` (0 = [uvw] is the normal of (hkl)), `zoneNumber(uvw, hkl)` = hu+kv+lw (exact; 0 = ZOLZ, n = n-th Laue zone).
+- Live readout: `cartesianToNearestUvw(lat, v, maxIndex = 6)` / `cartesianToNearestHkl(...)` → `{indices, angleDeg}`. **Exhaustive** over coprime triples, **signed** (looking down −[100] gives [−1 0 0]; apply `canonicalSign` if sign does not matter), lowest indices win exact ties. The candidate list is cached per `Lattice` object, so repeated calls during camera rotation cost about one dot product per candidate (maxIndex 6 ≈ 1,800 candidates).
+- Utilities: `reduceIndices`, `canonicalSign` (re-exported from `core/math/integers`; they never return −0), `gcd`; `core/math/{vec3,mat3,trig}` with `cosDeg`/`sinDeg` that are exact at 0/30/60/90/120/180° so cubic and hexagonal matrices contain true zeros; `core/errors.ts` with `CrystalLensError`, `LatticeError` (bad cell, zero vector), `SingularMatrixError`.
+- Validation: `buildLattice` throws `LatticeError` for non-finite or non-positive lengths, angles outside (0°, 180°) and angle triples that cannot close a parallelepiped (coplanar or sum ≥ 360°).
+
+**Things M1 found that later modules must know:**
+1. **Correction to M1/M7 as originally written.** In a hexagonal cell with γ = 120°, G·[110] ∝ (1,1,0), so [110] **is** parallel to the (110) normal; the pair that differs is [100] vs (100) (30°), and [100] ∥ (2 −1 0). I had claimed the opposite from memory and verified it numerically before writing any code. M7 acceptance was corrected too. Test index conversions with [100]/(100), not [110]/(110).
+2. **v6 bug 1 is narrower than stated** (see §6): wrong only for triclinic cells. Hexagonal and monoclinic-b cells were fine.
+3. **`acos` is the wrong tool for angles near 0° and 180°**: one ulp of rounding in the cosine becomes ~1e-6° (this made "exactly parallel" read 8.5e-7° in a first version). `angleBetween` uses `atan2(|a×b|, a·b)`; use it, not `acos(dot/…)`, anywhere a zone-axis readout or "is it parallel?" decision is made (M7, M10).
+4. **`nearest*` returns the true angular deviation** between the query and the exact direction, so M7 can implement "snap when < 2°" by comparing `angleDeg` directly.
+5. `Lattice` objects are keys of the candidate cache (a `WeakMap`); create one per structure and reuse it rather than calling `buildLattice` per frame.
 
 ---
 
@@ -479,7 +499,7 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 5. Publish `orientation` to the store; M8, M10 and M11 subscribe with a 150 ms debounce.
 
 **Accept when:**
-- Hexagonal [110] and (110) produce different views (v6 bug 4 regression).
+- In graphite (hexagonal), "view along [100]" and "view normal to (100)" give **different** views (30° apart), while "view along [110]" and "view normal to (110)" give the **same** view; "view along [100]" equals "view normal to (2 −1 0)" (v6 bug 4 regression; see M1 status). In monoclinic ZrO₂, [100] and the (100) normal differ by β − 90° = 9.23°.
 - The readout is stable (no flicker) at a zone axis.
 - Typing an index and reading it back round trips.
 
