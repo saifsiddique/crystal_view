@@ -20,3 +20,4 @@ export {
   type StructureResult,
 } from './structure';
 export { cifString, writeCif } from './write';
+export { toP1Structure } from './export';

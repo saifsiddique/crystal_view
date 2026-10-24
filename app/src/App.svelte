@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { APP_NAME } from './core/meta';
   import { getCompute } from './workers/client';
+  import Inspector from './Inspector.svelte';
 
   type Check = { state: 'pending' | 'ok' | 'error'; detail: string };
 
@@ -46,11 +47,13 @@
       <dd>{cores === null ? '…' : Math.max(1, cores - 1)}</dd>
     </dl>
   </section>
+
+  <Inspector />
 </main>
 
 <style>
   main {
-    max-width: 40rem;
+    max-width: 56rem;
     margin: 0 auto;
     padding: 3rem 1.5rem;
   }
