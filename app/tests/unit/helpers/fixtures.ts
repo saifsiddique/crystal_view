@@ -22,7 +22,11 @@ export interface Fixture {
   matrix_standard: NumMatrix;
   recip_matrix_standard: NumMatrix;
   space_group: { declared_number: number | null; detected_number: number; n_operations: number };
-  unit_cell: { n_sites: number; counts: Record<string, number> };
+  unit_cell: {
+    n_sites: number;
+    counts: Record<string, number>;
+    atoms: { species: Record<string, number>; frac: [number, number, number] }[];
+  };
   reflections: { rows: number[][] };
   zones: Record<string, string[]>;
   tem: { voltage_kV: number; wavelength: number; zones: Record<string, number[][]> };

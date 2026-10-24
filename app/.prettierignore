@@ -6,3 +6,4 @@ test-results
 package-lock.json
 tests/fixtures
 tests/cod_sample/
+src/core/symmetry/data/

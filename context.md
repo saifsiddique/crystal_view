@@ -20,7 +20,7 @@
 | M0 | Foundation & tooling | – | ✅ done 2026-10-23 (see §7.M0 and §10) |
 | M1 | Lattice & linear-algebra core | M0 | ✅ done 2026-10-23 (see §7.M1) |
 | M2 | CIF parser & writer | M0 | ✅ done 2026-10-23 (see §7.M2) |
-| M3 | Symmetry & Crystal model | M1, M2 | ☐ |
+| M3 | Symmetry & Crystal model | M1, M2 | ✅ done 2026-10-24 (see §7.M3) |
 | M4 | Scattering-factor tables | M0 | ☐ |
 | M5 | 3D structure renderer | M3 | ☐ |
 | M6 | View range, bonds, styles & colours | M5 | ☐ |
@@ -431,9 +431,9 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 
 **Tasks:**
 1. `symop.ts` parses `"-x+1/2, y, z+1/4"` (and forms like `x-y`, `1/2+x`, `+x`) into `{R, t}` with exact rationals. Don't use `eval` or mathjs.
-2. `spacegroup.ts`:
-   - If the CIF has no symops, generate them from the Hall symbol, the H-M symbol or the IT number.
-   - Use `moyo` or spglib (WASM) if available; otherwise bundle a JSON table of the 530 Hall settings.
+2. `spacegroup.ts` (as built):
+   - If the CIF has no symops, generate them from the Hall symbol, the H-M symbol or the IT number: a Hall-symbol interpreter plus a table of the 530 settings generated from spglib.
+   - Detection uses `@spglib/moyo-wasm` in `src/symmetry/detect.ts` (outside `core/`).
    - Detect the space group of the expanded structure (tolerance 1e-3) and warn on mismatch.
 3. `expand.ts` applies the symops, wraps to [0, 1), and **de-duplicates** using the minimum-image Cartesian distance < 0.01 Å. It records multiplicity per site and warns if two different sites coincide (e.g., disorder).
 4. `crystal.ts` provides `buildCrystal(cifBlock) → Crystal`, plus a summary (formula from the expanded content, Z, density, volume).
@@ -443,6 +443,31 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - The unit-cell content matches each fixture's `unit_cell` (`n_sites`, per-element weighted `counts`, and the `atoms` list including partial occupancies): Si = 8, NaCl = 8, rutile = 6, graphite = 4, ZrO₂ = 12, albite = 52, olivine = 28 sites.
 - The detected space-group **number** matches `detected_number` (compare numbers, not symbols: albite is declared `C -1` but pymatgen reports the standard `P-1`; `n_operations` includes centring, so albite = 4).
 - A CIF with only an H-M symbol and no symops expands correctly.
+
+#### M3 status: ✅ done 2026-10-24
+
+**Acceptance results:** 48 tests in `crystal.test.ts`, the Hall-symbol test over all 530 settings, 9 detection tests, and corpus tests. For all 7 fixtures: unit-cell positions (Si 8, NaCl 8, rutile 6, graphite 4, ZrO₂ 12, albite 52, olivine 28), per-element weighted counts, the space-group number, the operation count (albite 4) and every pymatgen atom (species, occupancy, position within 0.01 Å) agree. Rebuilding each cell from the H-M symbol alone, with the CIF's operations removed, gives the same cell for every fixture except albite (see below). **COD sample: 599/599 parsed files build; the result agrees with pymatgen on positions, element counts and space-group number for 590 of 595 comparable files** (the 5 differences: pymatgen's own duplicate sites in disordered structures, and 2 files whose positions have lower symmetry than declared). Mutation-checked (no de-duplication, no wrap tolerance, no group completion, Hall shift sign, Hall default axes).
+
+**API:**
+- `core/crystal.ts`: `buildCrystal(structure: CifStructure) → {crystal, warnings}`. `Crystal = {name, title?, ids, cell, lattice, spaceGroup, ops, rotations, sites, atoms, positions, summary}`.
+  - `sites`: the asymmetric-unit atoms as listed, each with `multiplicity` (number of distinct cell positions it generates), `typeSymbol` (keeps `Fe3+`), `uiso`, `aniso`.
+  - `atoms`: the unit-cell content, one per element per symmetry copy, `frac` in [0, 1), `site` index back to `sites`.
+  - `positions`: distinct places in the cell; more than one atom in a position is a mixed-occupancy site (Fe/Mg, Si/Al). **This is the "site" count pymatgen and the fixtures use.** M6 draws one sphere per atom (or a pie for mixed sites) at each position; M8/M9 sum over `atoms`.
+  - `spaceGroup`: `{number?, symbol?, crystalSystem?, declared, order, centring[], centrosymmetric, source}`; `source` is `cif-symops`, `space-group-table` or `p1-assumed`.
+  - `ops`: the full operation list (R integer, t in [0, 1)); `rotations`: distinct R (point group; M9 multiplicities); `spaceGroup.centring`: lattice centring vectors (M9/M8 absence labelling).
+  - `summary`: `{counts, formula (Hill order, per formula unit), Z?, volume}`.
+- `core/symmetry`: `parseSymop`/`formatSymop`/`composeOps`/`closure`/`uniqueOps` (`symop.ts`); `hallToOps` (`hall.ts`); space-group table lookups `findSpaceGroupsByHM`, `findSpaceGroupByHall`, `standardSetting`, `spaceGroupsByNumber`, `groupOrders`, `crystalSystemOf`, `pointGroupRotations`, `centringVectors` (`spacegroup.ts`); `orbit`, `PeriodicIndex`, `periodicDistance`, `wrapFrac` (`expand.ts`).
+- **Outside `core/`:** `src/symmetry/detect.ts` has `loadMoyo()` and `detectSpaceGroup(crystal, symprec = 1e-3)` using `@spglib/moyo-wasm` (moyo, a Rust re-implementation of spglib; MIT/Apache). It is async and loads WASM, so it is not in `core/`. In the browser `loadMoyo()` fetches the bundled wasm; in tests pass the bytes. Returns `{number, hmSymbol, hallNumber, pearsonSymbol, nOperations, wyckoffs}`. M14 should run it in the worker after loading a CIF and show a warning when `number` differs from `crystal.spaceGroup.number`.
+- `scripts/make_spacegroup_table.py` generates `core/symmetry/data/spacegroups.ts` (530 Hall settings with H-M names, from spglib) and `tests/fixtures/spacegroup_ops.json` (operation count and hash per setting).
+
+**Things M3 found that later modules must know:**
+1. **The Hall interpreter is exact:** it reproduces the operation set of all 530 spglib settings. So a CIF with no symops, but any Hall symbol, H-M symbol (with or without `:1`/`:2`/`:H` choice) or IT number, expands correctly. Without a choice suffix the symbol can be ambiguous (e.g. Fd-3m origin 1 or 2); the first setting is used and a warning says so.
+2. **Declared symmetry is trusted, then checked.** Listed operations are de-duplicated (pymatgen CIFs list each operation twice), completed to a group if they are only generators (with a warning), and compared with the allowed group orders of the declared IT number. An unreadable operation falls back to the symbol. **A centred cell of a primitive group is legitimate** (albite `C -1`, 4 operations, number 2) and gives no warning; its symbol cannot be found in the table, so such a CIF needs its operations.
+3. **True symmetry detection needs the WASM step.** 590 of 598 COD files have detected = declared at 1e-3 Å; the other 8 (e.g. 148 declared, 1 detected) are structures whose positions are rounded or disordered so that the declared symmetry holds only approximately. The UI should offer "use detected symmetry" rather than silently changing it.
+4. **Dedupe rules:** images of one atom within 0.01 Å (minimum image) merge; different atoms at the same spot are kept as one position and warned about only if their total occupancy exceeds 1.02. Coordinates within 1e-6 of 1 wrap to 0 (never −0).
+5. **Anisotropic U_ij are kept per site, not rotated onto symmetry copies.** M6 (ellipsoids, if ever) must rotate them with `ops[k].R` in the Cartesian frame.
+6. **Density is not computed here** (needs atomic masses, M4): `summary` has no density; M4 adds `density(crystal)`.
+7. pymatgen's own merging leaves near-duplicate sites in some disordered structures (e.g. COD 1536186), so a pymatgen site count is not an infallible reference for disordered files.
 
 ---
 
