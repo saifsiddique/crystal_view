@@ -3,11 +3,13 @@
   import { APP_NAME } from './core/meta';
   import { getCompute } from './workers/client';
   import Inspector from './Inspector.svelte';
+  import type { Crystal } from './core/crystal';
 
   type Check = { state: 'pending' | 'ok' | 'error'; detail: string };
 
   let kernel = $state<Check>({ state: 'pending', detail: 'starting worker…' });
   let cores = $state<number | null>(null);
+  let crystal = $state.raw<Crystal | null>(null);
 
   onMount(async () => {
     try {
@@ -48,7 +50,11 @@
     </dl>
   </section>
 
-  <Inspector />
+  {#await import('./ui/Viewer.svelte') then { default: Viewer }}
+    <Viewer {crystal} />
+  {/await}
+
+  <Inspector onCrystal={(c) => (crystal = c)} />
 </main>
 
 <style>

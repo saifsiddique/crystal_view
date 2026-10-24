@@ -43,6 +43,8 @@
   },
   "dependencies": {
     "@spglib/moyo-wasm": "^0.21.0",
-    "comlink": "^4.4.2"
+    "@types/three": "^0.186.0",
+    "comlink": "^4.4.2",
+    "three": "^0.186.1"
   }
 }

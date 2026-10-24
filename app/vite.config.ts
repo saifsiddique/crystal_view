@@ -7,7 +7,8 @@ export default defineConfig({
   base: './',
   plugins: [svelte()],
   worker: { format: 'es' },
-  build: { target: 'es2023' },
+  // three.js alone is ~500 kB minified; it loads with the viewer, not with the first paint.
+  build: { target: 'es2023', chunkSizeWarningLimit: 900 },
   test: {
     environment: 'node',
     include: ['tests/unit/**/*.test.ts'],

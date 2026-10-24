@@ -16,6 +16,8 @@
   import { bn, elementInfo, fe, fx, parseSpecies, sFromD } from './core/scattering';
   import { detectSpaceGroup, type DetectedSymmetry } from './symmetry/detect';
 
+  let { onCrystal }: { onCrystal?: (crystal: Crystal | null) => void } = $props();
+
   let fileName = $state('');
   let error = $state('');
   let outcomes = $state.raw<BlockOutcome[]>([]);
@@ -29,12 +31,14 @@
     block = index;
     detected = null;
     crystal = null;
+    onCrystal?.(null);
     warnings = [];
     const o = outcomes[index];
     if (!o?.structure) return;
     try {
       const built = buildCrystal(o.structure);
       crystal = built.crystal;
+      onCrystal?.(built.crystal);
       warnings = [...o.warnings, ...built.warnings].map((w) => w.message);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

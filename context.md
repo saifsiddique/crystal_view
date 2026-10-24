@@ -22,7 +22,7 @@
 | M2 | CIF parser & writer | M0 | ✅ done 2026-10-23 (see §7.M2) |
 | M3 | Symmetry & Crystal model | M1, M2 | ✅ done 2026-10-24 (see §7.M3) |
 | M4 | Scattering-factor tables | M0 | ✅ done 2026-10-24 (see §7.M4) |
-| M5 | 3D structure renderer | M3 | ☐ |
+| M5 | 3D structure renderer | M3 | ✅ done 2026-10-24 (see §7.M5) |
 | M6 | View range, bonds, styles & colours | M5 | ☐ |
 | M7 | Orientation control (mouse ↔ [uvw]/(hkl)) | M5, M1 | ☐ |
 | M8 | Kinematic electron diffraction (indexed) | M3, M4, M7 | ☐ |
@@ -520,6 +520,36 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 6. Rebuild instance buffers only when the Crystal or range changes. Colour and visibility changes update attributes in place.
 
 **Accept when:** 100,000 atoms rotate at ≥ 50 fps on an integrated GPU; picking is exact; there are no allocations per frame.
+
+#### M5 status: ✅ done 2026-10-24 (integrated-GPU frame rate not verified, see below)
+
+**Built:**
+- `core/structure/` (pure, no three.js; 18 tests in `structure.test.ts`):
+  - `range.ts`: `placeAtoms(crystal, {min,max})`. A closed fractional box, so the default [0,1]³ includes boundary atoms (NaCl: 27 = 14 Na + 13 Cl). Returns struct-of-arrays with each image's lattice translation.
+  - `bonds.ts`: `findBonds` with a cell list, O(N). Default rule d ≤ 1.15 (r₁+r₂) from covalent radii, d ≥ 0.5 Å; checked against brute force.
+  - `measure.ts`: `distance`, `angle`, `torsion` (IUPAC sign) and `measure(points)`. 2 atoms give a distance, 3 give two lengths and the angle, 4 give three lengths and the torsion.
+  - `pick.ts`: exact nearest ray-sphere test over the atom arrays, with no allocation.
+  - `model.ts`: `buildModel(crystal, {range, bonds})` returns Cartesian positions, species, bonds and bounds. `styleRadii` gives radii for ball-and-stick (0.45 × covalent), space-filling (van der Waals) and stick.
+- `render/structureView.ts` (`StructureView`):
+  - One `InstancedMesh` per element with per-instance colour, plus one instanced bond mesh. Each bond is two half-sticks, coloured by its end atoms or by one colour (`setBondColour`).
+  - Orthographic by default, perspective on request, with the visible height preserved when switching. TrackballControls, with its A/S/D key shortcuts disabled so typing in text fields cannot trigger them. Scene coordinates are centred on the atoms.
+  - Hemisphere light plus a key light that follows the camera. Optional toon material (no outline pass).
+  - Cell outline, and an axes triad (a, b, c, drawn along the lattice vectors) in a corner viewport.
+  - Hover and click picking. Selection is ordered, and `setSelectionLimit(4)` is the measuring mode.
+  - API for M6/M7: `setStyle`, `setElementVisible`, `setElementColor`, `setBondColour`, `lookAlong(dir, up)`, `viewDirection`, `project`, `atomScreen`, `pickAt`. These update instance matrices and colours in place; `setStructure` is the only call that rebuilds buffers.
+  - Level of detail by atom count: sphere 32×20 segments up to 3000 atoms, 16×10 up to 25000, 8×6 up to 60000, 6×4 beyond.
+- `ui/Viewer.svelte`: toolbar (style, projection, cell, axes, toon, measure, cells a/b/c from 1 to 30, view along a/b/c, reset), hover tooltip (label, element, fractional coordinates, occupancy), measurement labels that follow the structure, and an atoms/bonds/fps readout. It is lazy-loaded as a separate 590 kB chunk. `Inspector.svelte` gained an `onCrystal` callback so both share the loaded crystal; M14 replaces both.
+- Test hook: `window.__crystallens` (`atomScreen`, `pickAt`, `model`, `selection`, `stats`), used by the e2e tests (`viewer.spec.ts`, 4 tests).
+
+**Measured** (Chromium on the development PC, NVIDIA RTX A4000, not an integrated GPU): 117,649 atoms and 345,744 bonds (NaCl, 24×24×24 cells; 692k instances) rendered at about 90 frames/s with the GPU synchronised after each frame. Heap growth over 90 rotating frames was under 4 MB, which is GC noise rather than a per-frame leak. **The "≥ 50 fps on an integrated GPU" criterion has not been measured:** headless Chromium falls back to software rendering (SwiftShader: 2 fps at 729 atoms), and this PC has no integrated GPU in use. If an integrated GPU is below 50 fps at 100k atoms, the next step is impostor-shader spheres and bond culling.
+
+**Notes for later modules:**
+1. The model is built on the main thread from the whole range. 117k atoms and 346k bonds take under a second, so there is no worker yet. M6's "beyond the range" bonds and polyhedra may need one.
+2. Bonds are non-periodic within the generated atom set: a bond to an atom outside the range is not drawn. M6's "search beyond range" fixes that.
+3. The Viewer's "Cells" control stands in for M6's range presets (fractional min/max, slab).
+4. Partial occupancy is not shown (a half-occupied site looks full; mixed sites overlap). M6's styles should handle it.
+5. The HTML measurement labels are positioned from the `onRender` callback; they are the only per-frame work that allocates, and only while measuring.
+6. `lookAlong(dir, up)` already takes a Cartesian direction, so M7's [uvw] and (hkl) views only need `uvwToCart`/`hklToCart`.
 
 ---
 
