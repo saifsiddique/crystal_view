@@ -1,27 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-interface Hook {
-  atomScreen(i: number): { x: number; y: number };
-  stats(): { frames: number; renders: number };
-  model(): { count: number; bonds: Uint32Array; elements: string[]; species: Uint16Array };
-  pickAt(x: number, y: number): number | null;
-  selection(): number[];
-  viewState(): { direction: number[]; up: number[]; visibleHeight: number };
-  settings(): {
-    hiddenAtoms: unknown[];
-    appearance: { elements: Record<string, { visible?: boolean; color?: string }> };
-    bonds: { manual: { add: unknown[]; remove: unknown[] } };
-  };
-  bondsDrawn(): boolean;
-  appearanceMs(): number;
-  polyhedra(): { count: number; skipped: number };
-}
-declare global {
-  interface Window {
-    __crystallens: Hook;
-  }
-}
-
 // Tall enough that the viewer and its panel are on screen: Playwright ignores clicks outside.
 test.use({ viewport: { width: 1400, height: 1100 } });
 

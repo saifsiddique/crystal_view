@@ -1,19 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-interface Hook {
-  atomScreen(i: number): { x: number; y: number };
-  stats(): { frames: number; renders: number };
-  model(): { bonds: Uint32Array };
-  pickAt(x: number, y: number): number | null;
-  selection(): number[];
-  viewState(): { direction: number[]; up: number[]; visibleHeight: number };
-}
-declare global {
-  interface Window {
-    __crystallens: Hook;
-  }
-}
-
 // Tall enough that the whole viewer is on screen: Playwright ignores clicks outside the viewport.
 test.use({ viewport: { width: 1200, height: 1100 } });
 
@@ -31,7 +17,7 @@ async function settledView(page: Page) {
       await page.evaluate(() => window.__crystallens.viewState()),
       (_k, v: unknown) => (typeof v === 'number' ? Number(v.toFixed(5)) : v),
     );
-    if (now === last) return JSON.parse(now) as ReturnType<Hook['viewState']>;
+    if (now === last) return JSON.parse(now) as ReturnType<CrystalLensHook['viewState']>;
     last = now;
     await page.waitForTimeout(400);
   }

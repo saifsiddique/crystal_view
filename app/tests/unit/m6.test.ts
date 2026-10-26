@@ -365,15 +365,11 @@ describe('convex hulls and coordination polyhedra', () => {
     [0, 0, -1],
   ];
   const centroid = (pts: Vec3[]): Vec3 => {
-    const c: Vec3 = [0, 0, 0];
     const s = pts.reduce<[number, number, number]>(
       (a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]],
       [0, 0, 0],
     );
-    c[0] = s[0] / pts.length;
-    c[1] = s[1] / pts.length;
-    c[2] = s[2] / pts.length;
-    return c;
+    return [s[0] / pts.length, s[1] / pts.length, s[2] / pts.length];
   };
   const outward = (pts: Vec3[], faces: number[][]) => {
     const c = centroid(pts);
