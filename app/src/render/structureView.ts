@@ -521,7 +521,8 @@ export class StructureView {
     controls.rotateSpeed = 3;
     controls.zoomSpeed = 1.2;
     controls.panSpeed = 0.8;
-    controls.dynamicDampingFactor = 0.18;
+    // No inertia: the crystal stops where the pointer is released, so it can be placed precisely.
+    controls.staticMoving = true;
     // Its default A/S/D shortcuts would fire while typing in the page's text fields.
     controls.keys = ['', '', ''];
     if (keep) controls.target.copy(keep);

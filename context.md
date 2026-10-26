@@ -560,6 +560,7 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
    - `core/cellShape.ts` (`cellShape`, `shapeVectors`) and `ui/LatticeVectors.svelte` show the equations for a, b, c per lattice family, the numbers, and the AFLOW family page (`https://www.aflowlib.org/prototype-encyclopedia/<system>_lattice.html`). AFLOW's triclinic page uses the same a ∥ x, b-in-xy convention.
    - `core/radiation.ts` holds the Kα₁ lines (Hölzer 1997). **Cu Kα₁ is the default wavelength wherever one is needed** (user's choice; M9 should keep it).
    - The "Worker pool size" line, which showed cores − 1 although only one worker exists, now shows the CPU thread count and "compute workers running: 1".
+5. **No inertia** (user request, 2026-10-26): `controls.staticMoving = true`. With damping, the structure kept turning after the release, so it could not be placed on a zone axis by hand. An e2e test checks that the view does not move after release.
 
 ---
 

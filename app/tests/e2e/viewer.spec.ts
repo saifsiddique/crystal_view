@@ -23,7 +23,7 @@ async function load(page: Page, name: string) {
   await expect(page.getByTestId('hud')).toContainText('atoms');
 }
 
-/** The camera state once the trackball's damping has died out (slow in software rendering). */
+/** The camera state once it has stopped changing (frames are slow in software rendering). */
 async function settledView(page: Page) {
   let last = '';
   for (let i = 0; i < 40; i++) {
@@ -185,4 +185,18 @@ test('changing the number of cells keeps the orientation and zoom', async ({ pag
   await page.waitForTimeout(300);
   const fresh = await page.evaluate(() => window.__crystallens.viewState());
   expect(Math.abs(fresh.direction[2])).toBeGreaterThan(0.9);
+});
+
+test('the structure stops where the pointer is released (no inertia)', async ({ page }) => {
+  await load(page, 'NaCl');
+  const box = (await page.getByTestId('viewer-canvas').boundingBox())!;
+  await page.mouse.move(box.x + 30, box.y + 30);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 200, box.y + 120, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(200); // one or two frames to apply the last move
+  const released = await page.evaluate(() => window.__crystallens.viewState());
+  await page.waitForTimeout(1500);
+  const later = await page.evaluate(() => window.__crystallens.viewState());
+  for (let k = 0; k < 3; k++) expect(later.direction[k]).toBeCloseTo(released.direction[k], 4);
 });
