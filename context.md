@@ -23,7 +23,7 @@
 | M3 | Symmetry & Crystal model | M1, M2 | ✅ done 2026-10-24 (see §7.M3) |
 | M4 | Scattering-factor tables | M0 | ✅ done 2026-10-24 (see §7.M4) |
 | M5 | 3D structure renderer | M3 | ✅ done 2026-10-24 (see §7.M5) |
-| M6 | View range, bonds, styles & colours | M5 | ☐ |
+| M6 | View range, bonds, styles & colours | M5 | ✅ done 2026-10-26 (see §7.M6) |
 | M7 | Orientation control (mouse ↔ [uvw]/(hkl)) | M5, M1 | ☐ |
 | M8 | Kinematic electron diffraction (indexed) | M3, M4, M7 | ☐ |
 | M9 | Powder XRD | M3, M4 | ☐ |
@@ -588,6 +588,37 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - The Si bond count per atom is 4 inside the cell.
 - Changing a colour updates in < 16 ms.
 - All settings survive a session round trip (M12).
+
+**Added by the user for this module (2026-10-26):**
+1. The single Reset button becomes three: **Reset view** (default orientation and centring, zoom unchanged), **Reset zoom** (magnification back to fit, orientation and pan unchanged), **Reset range** (one cell with boundary atoms, no slab).
+2. A **Bonds** checkbox that, when unticked, draws no bonds.
+
+#### M6 status: ✅ done 2026-10-26 (partial occupancy is still not drawn specially; see the end of this block)
+
+**Acceptance results:** NaCl cell + boundary = 27 atoms (presets: 1 cell = 8, 2×2×2 = 125); every Si atom inside a 3×3×3 block has 4 bonds (and every unit-cell atom has 4 graph neighbours; NaCl atoms have 6). 364 unit tests (39 in `m6.test.ts`, the corpus checks in `m6-corpus.test.ts`), 25 browser tests (`m6.spec.ts` has 16). All settings are plain JSON: `parseViewSettings(JSON.parse(JSON.stringify(s)), crystal)` returns an equal object for a heavily edited state (tested), and fills in defaults for anything missing or malformed. M12 only has to store `ViewSettings`.
+- **Colour change timing:** under 16 ms for ordinary structures (e2e asserts it on NaCl). On the 117,649-atom / 345,744-bond stress structure (RTX A4000, Chromium) a colour change costs about 20 ms of JavaScript in steady state (resolve ≈ 5 ms + writing 118k atom and 692k bond-half colours ≈ 13 ms), with occasional 30-40 ms garbage-collection spikes and ~100 ms on the very first change (JIT warm-up). The GPU upload of the colour buffers is asynchronous and not included. So the criterion is met for normal sizes and missed by about 5 ms at 100k+ atoms. Hiding an element at that size takes about 100-150 ms, a style change about 120-150 ms (all matrices are rewritten); the Bonds checkbox is instant (the bond mesh is just hidden).
+- **Real files:** 592 COD files, the 7 fixtures and the 18 files in `simulation/cifs` pass `m6-corpus.test.ts` (no exceptions; the spatial bond search and the periodic bond graph agree; every atom added beyond the range is bonded to a shown atom; polyhedra for every element are well-formed). Slowest file 563 ms for the whole battery.
+
+**Built (`core/structure/`, all pure):**
+- `range.ts`: `placeAtoms(crystal, range, {boundary, slab})`. `boundary` false makes the upper bounds exclusive ([0,1) is the 8 atoms of the cell). `slab` is `{hkl, offset, thickness}` in Å from the plane through the origin, intersected with the box (the box gives the sideways extent). `presetRange`, `atomKey(atom, i, j, k)` (a number identifying an atom image).
+- `bonds.ts`: `BondRule {a, b, min, max, visible, color?, radius}` (one rule per unordered element pair), `findBonds` (cell list, now returns `{pairs, rule}`), `limitsFromRules`, `defaultBondRules(crystal)`. The default table has only the element pairs that actually bond (NaCl starts with Cl–Na only). **Metal–metal pairs are left out when the compound contains an anion-forming element** (N, O, F, S, Cl, Se, Br, Te, I): Ti–Ti is 2.96 Å in rutile and would be drawn bonded by the covalent-radius rule. In an intermetallic (no anion) they stay. Users can add pairs back.
+- `graph.ts`: the periodic bond graph (`buildBondGraph`, cached by `getBondGraph`): for each unit-cell atom, its neighbours as (atom, lattice shift). `extendBonded` uses it for "beyond the range" (one shell) and "complete molecules" (repeat until closed, gives up after 50,000 added atoms and then returns a framework warning and one shell). All O(N).
+- `model.ts`: `buildModel(crystal, {range, boundary, slab, bonds: {rules, beyondRange, completeMolecules, manual} | false})`. The model gained `inRange` (0 for atoms added because they are bonded), `bondRule` (rule index per bond, `MANUAL_RULE` for hand-drawn ones), `rules` and `warnings`. Beyond the range, bonds between two *added* atoms are dropped. Manual bonds are `AtomRef` pairs (`{atom, cell}`); one whose atoms are not shown is ignored.
+- `styles.ts`: `AppearanceSettings` (display style, radius scheme `auto|covalent|ionic|vdw|uniform`, scale, uniform radius, per-element and per-site `{color, radius, visible}`, bonds visible, background, labels); `resolveSites`, `resolveColours` (colours only, the fast path), `resolveAppearance` (arrays for the renderer), `bondHalfColours`, `visibilityTree`, `atomLabel`. Precedence: per-site, per-element, scheme. `auto` is covalent × 0.45 for ball-and-stick and van der Waals for space-filling; stick style uses the largest rule radius. Ionic radii come from the oxidation state in the site's type symbol (Shannon), covalent when there is none.
+- `polyhedra.ts`: `convexHullFaces` (brute-force hull, coplanar points make one polygon, outward winding; Euler-checked) and `buildPolyhedra`. **A polyhedron is drawn only when all of its centre's bonded neighbours (as the whole crystal's bond graph counts them) are shown**, so atoms cut by the range edge get none unless "search bonds beyond the range" is on. Bonds hidden by their rule still count. Capped at 20,000 centres.
+- `settings.ts`: `ViewSettings` (range+boundary+slab, bonds, polyhedra, appearance, hiddenAtoms, showCell, showAxes, toon, projection), `defaultViewSettings`, `settingsForNewCrystal` (rules, overrides, hidden atoms and range start over; style, radius scheme, background, labels, cell, axes, toon, projection carry over), `applyRangePreset`, `addManualBond` / `removeManualBond` (drawing a removed bond restores it and deleting a drawn bond forgets it), `parseViewSettings`.
+
+**UI (`ui/Viewer.svelte`, `ui/ViewPanel.svelte`):** toolbar with Style, Projection, Cell, Axes, Toon, **Bonds**, Measure, View along a/b/c and **Reset view / Reset zoom / Reset range**. A panel beside the view has: Range (presets, min/max per axis, boundary, slab), Bonds (beyond range, complete molecules, rule table with min/max/radius/colour/shown/delete, add pair, reset rules, draw/delete a bond between the 2 selected atoms), Polyhedra (centre elements, opacity, edges), Appearance (radius scheme and scale, uniform radius, background colour, atom labels) and an Elements-sites-visibility tree (show, colour and radius per element and per site; Hide N selected; Show N hidden). The old "Cells a/b/c" control is gone (use the range). The Viewer is lazy-loaded; the page is wider (78rem).
+- **Renderer API (`render/structureView.ts`):** `setAppearance(app, shape)`, `setColours(colours)`, `setBondsDrawn(on)`, `setPolyhedra(geometry, opacity, edges)`, `resetOrientation()`, `resetZoom()`. The M5 `setStyle`, `setElementVisible`, `setElementColor` and `setBondColour` are gone (they are settings now). Bond colours are written straight from the atom colours (or the rule's own), so no per-bond colour array exists.
+- **Test hook** `window.__crystallens` gained `settings`, `bondsDrawn`, `appearanceMs`, `polyhedra`.
+
+**Notes for later modules:**
+1. **Not done: partial occupancy.** A half-occupied site is still drawn as a full sphere and mixed sites (Fe/Mg) overlap. The M6 task list does not name it; it needs pie-chart spheres or radius scaling and is a natural follow-up.
+2. The model is still built on the main thread (117k atoms and 346k bonds in under a second). "Complete molecules" and the polyhedra loop are the only parts that could grow; both are capped.
+3. The panel is a stand-in for M14's panels; `Viewer.svelte` still owns the `ViewSettings` state. M14 should move it into `state/` and keep `core/structure/settings.ts` as is.
+4. Atom labels are a 2-D overlay canvas, capped at 4,000 atoms. Reset view recentres (it clears the pan); Reset zoom does not.
+5. `expect.timeout` is 15 s in `playwright.config.ts`: software WebGL with six parallel workers is slow, and one picture-comparison test failed once at 5 s.
+6. M7 only needs `view.lookAlong` (already Cartesian); M12 needs `ViewSettings` plus `viewState()` for the camera.
 
 ---
 

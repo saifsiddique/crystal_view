@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 // Serves the production build (`vite preview`) so e2e exercises the real bundle, worker and .wasm.
 export default defineConfig({
   testDir: './tests/e2e',
+  // Software WebGL in headless Chromium is slow when several workers draw at once.
+  expect: { timeout: 15_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

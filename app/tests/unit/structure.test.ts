@@ -6,13 +6,13 @@ import {
   RangeError,
   angle,
   buildModel,
-  defaultBondLimits,
+  limitsFromRules,
+  newBondRule,
   distance,
   findBonds,
   measure,
   pickSphere,
   placeAtoms,
-  styleRadii,
   torsion,
 } from '../../src/core/structure';
 import { fixtureDir } from './helpers/fixtures';
@@ -85,8 +85,12 @@ describe('findBonds', () => {
     const count = 400;
     const cart = new Float64Array(3 * count).map(() => rnd() * 20);
     const species = new Uint16Array(count).map(() => Math.floor(rnd() * 3));
-    const limits = defaultBondLimits([0.7, 1.1, 1.5]);
-    const got = findBonds({ cart, count, species, nSpecies: 3, ...limits });
+    const elements = ['H', 'C', 'O'];
+    const rules = [];
+    for (let i = 0; i < 3; i++)
+      for (let j = i; j < 3; j++) rules.push(newBondRule(elements[i], elements[j]));
+    const limits = limitsFromRules(elements, rules);
+    const got = findBonds({ cart, count, species, nSpecies: 3, ...limits }).pairs;
     const found = new Set<string>();
     for (let b = 0; b < got.length; b += 2) found.add(`${got[b]} ${got[b + 1]}`);
     const expected = new Set<string>();
@@ -105,10 +109,10 @@ describe('findBonds', () => {
   });
 
   it('handles empty and single-atom inputs', () => {
-    const limits = defaultBondLimits([1]);
+    const limits = limitsFromRules(['C'], [newBondRule('C', 'C')]);
     const base = { species: new Uint16Array(1), nSpecies: 1, ...limits };
-    expect(findBonds({ ...base, cart: new Float64Array(0), count: 0 })).toHaveLength(0);
-    expect(findBonds({ ...base, cart: new Float64Array(3), count: 1 })).toHaveLength(0);
+    expect(findBonds({ ...base, cart: new Float64Array(0), count: 0 }).pairs).toHaveLength(0);
+    expect(findBonds({ ...base, cart: new Float64Array(3), count: 1 }).pairs).toHaveLength(0);
   });
 });
 
@@ -118,16 +122,6 @@ describe('model and styles', () => {
     expect(model.elements.sort()).toEqual(['Cl', 'Na']);
     expect(model.info.every((i) => /^#[0-9a-f]{6}$/.test(i.color))).toBe(true);
     expect(model.bounds.max[0]).toBeCloseTo(5.62, 3);
-  });
-
-  it('gives space-filling spheres bigger than ball-and-stick, and no bonds', () => {
-    const model = buildModel(load('NaCl'));
-    const ball = styleRadii(model, 'ballStick');
-    const fill = styleRadii(model, 'spaceFill');
-    expect(fill.atom[0]).toBeGreaterThan(ball.atom[0]);
-    expect(fill.showBonds).toBe(false);
-    expect(ball.showBonds).toBe(true);
-    expect(styleRadii(model, 'stick').atom[0]).toBe(Math.fround(ball.bond));
   });
 
   it('can skip the bond search', () => {

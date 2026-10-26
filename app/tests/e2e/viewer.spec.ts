@@ -116,8 +116,8 @@ test('the structure changes with the cells control, and perspective renders too'
   page,
 }) => {
   await load(page, 'NaCl');
-  await page.getByLabel('Cells along a').fill('2');
-  await page.getByLabel('Cells along a').dispatchEvent('change');
+  await page.getByLabel('a max', { exact: true }).fill('2');
+  await page.getByLabel('a max', { exact: true }).dispatchEvent('change');
   await expect(page.getByTestId('hud')).toContainText('45 atoms');
   await page.getByTestId('projection').selectOption('persp');
   await page.getByTestId('style').selectOption('spaceFill');
@@ -169,8 +169,8 @@ test('changing the number of cells keeps the orientation and zoom', async ({ pag
   await page.mouse.wheel(0, -300);
   const before = await settledView(page);
 
-  await page.getByLabel('Cells along a').fill('3');
-  await page.getByLabel('Cells along a').dispatchEvent('change');
+  await page.getByLabel('a max', { exact: true }).fill('3');
+  await page.getByLabel('a max', { exact: true }).dispatchEvent('change');
   await expect(page.getByTestId('hud')).toContainText('63 atoms');
   const after = await settledView(page);
   for (let k = 0; k < 3; k++) {

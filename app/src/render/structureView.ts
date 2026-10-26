@@ -1,13 +1,15 @@
 /**
- * Three.js view of a `StructureModel` (context.md M5).
+ * Three.js view of a `StructureModel` (context.md M5, M6).
  *
  * - One `InstancedMesh` of spheres per element, with per-instance colour; one instanced cylinder
  *   mesh for the bonds (each bond is two half-sticks so it can be coloured by its end atoms).
  * - Orthographic camera by default, perspective on request; trackball rotation (no gimbal lock).
  * - Picking is an exact ray-sphere test over the atom arrays (core/structure/pick.ts).
- * - Instance buffers are rebuilt only in `setStructure`. Style, colour, visibility and selection
- *   changes rewrite the affected matrices and colours in place. The frame loop allocates nothing
- *   and renders only when something changed.
+ * - Instance buffers are rebuilt only in `setStructure`. `setAppearance` applies resolved radii,
+ *   colours and visibility (core/structure/styles.ts) in place; a colour-only change rewrites
+ *   just the colour buffers. The frame loop allocates nothing and renders only when something
+ *   changed.
+ * - Coordination polyhedra are one translucent mesh plus one line mesh (`setPolyhedra`).
  *
  * Scene coordinates are Cartesian angstrom with the origin moved to the centre of the atoms, so
  * float32 stays accurate however far the range extends.
@@ -21,11 +23,14 @@ import {
   Color,
   CylinderGeometry,
   DirectionalLight,
+  DoubleSide,
   HemisphereLight,
+  InstancedBufferAttribute,
   InstancedMesh,
   LineBasicMaterial,
   LineSegments,
   Material,
+  Mesh,
   MeshStandardMaterial,
   MeshToonMaterial,
   OrthographicCamera,
@@ -44,7 +49,10 @@ import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import type { Lattice } from '../core/lattice';
 import type { Vec3 } from '../core/math/vec3';
 import { pickSphere } from '../core/structure/pick';
-import { styleRadii, type DisplayStyle, type StructureModel } from '../core/structure/model';
+import type { StructureModel } from '../core/structure/model';
+import type { PolyhedraGeometry } from '../core/structure/polyhedra';
+import { MANUAL_RULE } from '../core/structure/bonds';
+import type { Appearance, Colours } from '../core/structure/styles';
 
 export type Projection = 'ortho' | 'persp';
 
@@ -68,6 +76,12 @@ const TRIAD_SIZE = 120;
 const HIGHLIGHT = new Color(0xffd23f);
 const SELECT_SCALE = 1.18;
 
+/** sRGB byte to linear light, the space three.js blends colours in. */
+const SRGB_TO_LINEAR = new Float32Array(256).map((_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+});
+
 export class StructureView {
   readonly stats: ViewStats = { fps: 0, frames: 0, renders: 0 };
 
@@ -89,17 +103,13 @@ export class StructureView {
   private lattice: Lattice | null = null;
   private origin: Vec3 = [0, 0, 0];
   private pos = new Float32Array(0);
-  private baseRadius: Float32Array = new Float32Array(0);
+  private app: Appearance | null = null;
   private pickRadius = new Float32Array(0);
-  private hidden = new Uint8Array(0);
   private selected = new Uint8Array(0);
   private slot = new Uint32Array(0);
-  private colours: Color[] = [];
-  private elementVisible: boolean[] = [];
-  private bondColour: Color | null = null;
-  private bondRadius = 0.12;
-  private showBonds = true;
-  private style: DisplayStyle = 'ballStick';
+  private atomColourArrays: Float32Array[] = [];
+  private polyMesh: Mesh | null = null;
+  private polyEdges: LineSegments | null = null;
   private atomMeshes: InstancedMesh[] = [];
   private atomMembers: Uint32Array[] = [];
   private bondMesh: InstancedMesh | null = null;
@@ -213,12 +223,10 @@ export class StructureView {
     this.pos = new Float32Array(3 * n);
     for (let i = 0; i < n; i++)
       for (let k = 0; k < 3; k++) this.pos[3 * i + k] = model.cart[3 * i + k] - this.origin[k];
-    this.hidden = new Uint8Array(n);
+    this.app = null;
     this.selected = new Uint8Array(n);
     this.slot = new Uint32Array(n);
     this.pickRadius = new Float32Array(n);
-    this.colours = model.info.map((i) => new Color(i.color));
-    this.elementVisible = model.elements.map(() => true);
     this.selection = [];
 
     // Level of detail: a sphere is 640 triangles at full quality, 96 for large structures and 48
@@ -245,6 +253,7 @@ export class StructureView {
     }
     this.atomMeshes = model.elements.map((_, s) => {
       const mesh = new InstancedMesh(this.sphereCache!, this.material, counts[s]);
+      mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(3 * counts[s]), 3);
       mesh.frustumCulled = false;
       this.scene.add(mesh);
       return mesh;
@@ -253,24 +262,17 @@ export class StructureView {
     const nBonds = model.bonds.length / 2;
     if (nBonds > 0) {
       this.bondMesh = new InstancedMesh(this.cylinderCache, this.material, 2 * nBonds);
+      this.bondMesh.instanceColor = new InstancedBufferAttribute(new Float32Array(6 * nBonds), 3);
       this.bondMesh.frustumCulled = false;
       this.scene.add(this.bondMesh);
     }
 
     this.buildCellLines();
     this.buildTriad();
-    this.applyStyle(this.style);
+    this.atomColourArrays = this.atomMeshes.map((m) => m.instanceColor!.array as Float32Array);
     if (saved) this.restoreView(saved);
     else this.fitCamera();
     this.requestRender();
-  }
-
-  setStyle(style: DisplayStyle): void {
-    this.style = style;
-    if (this.model) {
-      this.applyStyle(style);
-      this.requestRender();
-    }
   }
 
   setProjection(projection: Projection): void {
@@ -334,35 +336,107 @@ export class StructureView {
     return this.toon;
   }
 
-  /** Show or hide every atom of an element (bonds to hidden atoms are hidden too). */
-  setElementVisible(element: string, visible: boolean): void {
-    const s = this.model?.elements.indexOf(element) ?? -1;
-    if (s < 0) return;
-    this.elementVisible[s] = visible;
-    for (const i of this.atomMembers[s]) {
-      this.hidden[i] = visible ? 0 : 1;
-      this.writeAtom(i);
+  /**
+   * Apply resolved radii, colours and visibility (see `resolveAppearance`). With `shape` false only
+   * the colours are rewritten, which is what a colour-picker drag needs.
+   */
+  setAppearance(app: Appearance, shape = true): void {
+    const model = this.model;
+    if (!model) return;
+    this.app = app;
+    const n = model.count;
+    if (shape) {
+      for (let i = 0; i < n; i++) this.writeAtom(i);
+      for (const m of this.atomMeshes) m.instanceMatrix.needsUpdate = true;
     }
-    this.atomMeshes[s].instanceMatrix.needsUpdate = true;
-    this.writeAllBonds();
+    for (let i = 0; i < n; i++) this.writeAtomColour(i);
+    for (const m of this.atomMeshes) m.instanceColor!.needsUpdate = true;
+    this.writeBonds(shape);
+    if (this.bondMesh) this.bondMesh.visible = app.bondsDrawn;
     this.requestRender();
   }
 
-  setElementColor(element: string, hex: string): void {
-    const s = this.model?.elements.indexOf(element) ?? -1;
-    if (s < 0) return;
-    this.colours[s] = new Color(hex);
-    for (const i of this.atomMembers[s]) this.writeAtomColour(i);
-    this.atomMeshes[s].instanceColor!.needsUpdate = true;
-    this.writeAllBonds();
+  /** Rewrite only the colours (a colour-picker drag); radii and visibility stay. */
+  setColours(c: Colours): void {
+    const model = this.model;
+    if (!model || !this.app) return;
+    this.app = { ...this.app, ...c };
+    const n = model.count;
+    for (let i = 0; i < n; i++) this.writeAtomColour(i);
+    for (const m of this.atomMeshes) m.instanceColor!.needsUpdate = true;
+    this.writeBondColours();
     this.requestRender();
   }
 
-  /** One colour for every bond, or null to split bonds by their end atoms. */
-  setBondColour(hex: string | null): void {
-    this.bondColour = hex ? new Color(hex) : null;
-    this.writeAllBonds();
+  /** Draw the bond sticks or not, without touching their buffers. */
+  setBondsDrawn(on: boolean): void {
+    if (this.app) this.app = { ...this.app, bondsDrawn: on };
+    if (this.bondMesh) this.bondMesh.visible = on;
     this.requestRender();
+  }
+
+  /** Whether the bond sticks are drawn at all. */
+  get bondsDrawn(): boolean {
+    return this.bondMesh?.visible ?? false;
+  }
+
+  /**
+   * Draw translucent coordination polyhedra (null for none). Positions are Cartesian angstrom.
+   */
+  setPolyhedra(geometry: PolyhedraGeometry | null, opacity: number, edges: boolean): void {
+    this.clearPolyhedra();
+    if (!geometry || geometry.count === 0) {
+      this.requestRender();
+      return;
+    }
+    const tri = new BufferGeometry();
+    const pos = new Float32Array(geometry.triangles.length);
+    const col = new Float32Array(geometry.triangleColor.length);
+    for (let i = 0; i < pos.length; i++) pos[i] = geometry.triangles[i] - this.origin[i % 3];
+    for (let i = 0; i < col.length; i++) col[i] = SRGB_TO_LINEAR[geometry.triangleColor[i]];
+    tri.setAttribute('position', new BufferAttribute(pos, 3));
+    tri.setAttribute('color', new BufferAttribute(col, 3));
+    tri.computeVertexNormals(); // not indexed, so every triangle gets its own flat normal
+    this.polyMesh = new Mesh(
+      tri,
+      new MeshStandardMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity,
+        side: DoubleSide,
+        depthWrite: false,
+        roughness: 0.6,
+        metalness: 0,
+      }),
+    );
+    this.polyMesh.renderOrder = 5;
+    this.polyMesh.frustumCulled = false;
+    this.scene.add(this.polyMesh);
+    if (edges && geometry.edges.length > 0) {
+      const eg = new BufferGeometry();
+      const ep = new Float32Array(geometry.edges.length);
+      const ec = new Float32Array(geometry.edgeColor.length);
+      for (let i = 0; i < ep.length; i++) ep[i] = geometry.edges[i] - this.origin[i % 3];
+      for (let i = 0; i < ec.length; i++) ec[i] = SRGB_TO_LINEAR[Math.round(geometry.edgeColor[i])];
+      eg.setAttribute('position', new BufferAttribute(ep, 3));
+      eg.setAttribute('color', new BufferAttribute(ec, 3));
+      this.polyEdges = new LineSegments(eg, new LineBasicMaterial({ vertexColors: true }));
+      this.polyEdges.renderOrder = 6;
+      this.polyEdges.frustumCulled = false;
+      this.scene.add(this.polyEdges);
+    }
+    this.requestRender();
+  }
+
+  private clearPolyhedra(): void {
+    for (const o of [this.polyMesh, this.polyEdges]) {
+      if (!o) continue;
+      this.scene.remove(o);
+      o.geometry.dispose();
+      (o.material as Material).dispose();
+    }
+    this.polyMesh = null;
+    this.polyEdges = null;
   }
 
   /** 0 allows any number of selected atoms; otherwise the oldest is dropped past the limit. */
@@ -407,9 +481,36 @@ export class StructureView {
     this.requestRender();
   }
 
-  /** The default three-quarter view along c with a slight tilt. */
-  resetView(): void {
-    this.fitCamera();
+  /**
+   * Back to the default orientation (looking mostly along c, slightly tilted) and re-centred; the
+   * magnification stays as it is.
+   */
+  resetOrientation(): void {
+    if (!this.model) return;
+    const keep =
+      this.camera === this.ortho
+        ? this.distance
+        : this.camera.position.distanceTo(this.controls.target);
+    this.controls.target.set(0, 0, 0);
+    this.camera.up.set(0, 1, 0);
+    this.v1.set(0.28, 0.2, 1).normalize();
+    this.camera.position.copy(this.v1).multiplyScalar(keep);
+    this.updateProjection();
+    this.controls.update();
+    this.requestRender();
+  }
+
+  /** Magnification back to "whole structure fits"; orientation and pan stay as they are. */
+  resetZoom(): void {
+    if (!this.model) return;
+    if (this.camera === this.ortho) {
+      this.ortho.zoom = 1;
+    } else {
+      this.v1.copy(this.camera.position).sub(this.controls.target).normalize();
+      this.camera.position.copy(this.controls.target).addScaledVector(this.v1, this.distance);
+    }
+    this.updateProjection();
+    this.controls.update();
     this.requestRender();
   }
 
@@ -552,34 +653,20 @@ export class StructureView {
     this.cylinderCache?.dispose();
     this.sphereCache = null;
     this.cylinderCache = null;
+    this.clearPolyhedra();
     this.selection = [];
     this.hoverAtom = null;
     this.measureLines.geometry.setDrawRange(0, 0);
   }
 
-  private applyStyle(style: DisplayStyle): void {
-    const model = this.model!;
-    const radii = styleRadii(model, style);
-    this.baseRadius = radii.atom;
-    this.bondRadius = radii.bond;
-    this.showBonds = radii.showBonds;
-    for (let i = 0; i < model.count; i++) {
-      this.hidden[i] = this.elementVisible[model.species[i]] ? 0 : 1;
-      this.writeAtom(i);
-      this.writeAtomColour(i);
-    }
-    for (const m of this.atomMeshes) {
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    }
-    this.writeAllBonds();
-  }
-
   /** Write the matrix of atom i into its mesh, without flagging an upload. */
   private writeAtom(i: number): void {
     const m = this.model!;
-    const r = this.hidden[i] ? 0 : this.baseRadius[i] * (this.selected[i] ? SELECT_SCALE : 1);
-    this.pickRadius[i] = this.hidden[i] ? 0 : this.baseRadius[i];
+    const app = this.app;
+    const shown = app !== null && app.atomVisible[i] === 1;
+    const base = shown ? app.atomRadius[i] : 0;
+    const r = base * (this.selected[i] ? SELECT_SCALE : 1);
+    this.pickRadius[i] = base;
     const a = this.atomMeshes[m.species[i]].instanceMatrix.array as Float32Array;
     const o = this.slot[i] * 16;
     a[o] = r;
@@ -601,10 +688,21 @@ export class StructureView {
   }
 
   private writeAtomColour(i: number): void {
-    const s = this.model!.species[i];
-    this.colour.copy(this.colours[s]);
-    if (this.selected[i]) this.colour.lerp(HIGHLIGHT, 0.55);
-    this.atomMeshes[s].setColorAt(this.slot[i], this.colour);
+    const app = this.app;
+    if (!app) return;
+    const arr = this.atomColourArrays[this.model!.species[i]];
+    const o = this.slot[i] * 3;
+    let r = SRGB_TO_LINEAR[app.atomColor[3 * i]];
+    let g = SRGB_TO_LINEAR[app.atomColor[3 * i + 1]];
+    let b = SRGB_TO_LINEAR[app.atomColor[3 * i + 2]];
+    if (this.selected[i]) {
+      r += (HIGHLIGHT.r - r) * 0.55;
+      g += (HIGHLIGHT.g - g) * 0.55;
+      b += (HIGHLIGHT.b - b) * 0.55;
+    }
+    arr[o] = r;
+    arr[o + 1] = g;
+    arr[o + 2] = b;
   }
 
   private writeAtomAndMark(i: number): void {
@@ -615,41 +713,78 @@ export class StructureView {
     this.atomMeshes[s].instanceColor!.needsUpdate = true;
   }
 
-  private writeAllBonds(): void {
+  /** Bond matrices (when `shape`) and colours from the appearance arrays. */
+  private writeBonds(shape: boolean): void {
     const mesh = this.bondMesh;
     const model = this.model;
-    if (!mesh || !model) return;
+    const app = this.app;
+    if (!mesh || !model || !app) return;
     const a = mesh.instanceMatrix.array as Float32Array;
-    for (let b = 0; b < model.bonds.length / 2; b++) {
+    const nb = model.bonds.length / 2;
+    for (let b = 0; b < nb; b++) {
       const i = model.bonds[2 * b];
       const j = model.bonds[2 * b + 1];
-      const off = !this.showBonds || this.hidden[i] || this.hidden[j];
-      for (let half = 0; half < 2; half++) {
-        const from = half === 0 ? i : j;
-        const to = half === 0 ? j : i;
-        const o = (2 * b + half) * 16;
-        if (off) {
-          a.fill(0, o, o + 16);
-          a[o + 15] = 1;
-        } else {
-          this.writeHalfBond(a, o, from, to);
+      if (shape) {
+        const on = app.bondVisible[b] === 1;
+        for (let half = 0; half < 2; half++) {
+          const o = (2 * b + half) * 16;
+          if (!on) {
+            a.fill(0, o, o + 16);
+            a[o + 15] = 1;
+          } else if (half === 0) {
+            this.writeHalfBond(a, o, i, j, app.bondRadius[b]);
+          } else {
+            this.writeHalfBond(a, o, j, i, app.bondRadius[b]);
+          }
         }
-        const c = this.bondColour ?? this.colours[model.species[from]];
-        mesh.setColorAt(2 * b + half, c);
       }
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (shape) mesh.instanceMatrix.needsUpdate = true;
+    this.writeBondColours();
+  }
+
+  /** Bond colours straight from the atom colours (or the rule's own), two halves per bond. */
+  private writeBondColours(): void {
+    const mesh = this.bondMesh;
+    const app = this.app;
+    const model = this.model;
+    if (!mesh || !app || !model) return;
+    const out = mesh.instanceColor!.array as Float32Array;
+    const { bonds, bondRule } = model;
+    const { atomColor, ruleColor, ruleColored } = app;
+    const lin = SRGB_TO_LINEAR;
+    const nb = bondRule.length;
+    for (let b = 0; b < nb; b++) {
+      const ri = bondRule[b];
+      const o = 6 * b;
+      if (ri !== MANUAL_RULE && ruleColored[ri] === 1) {
+        const r = lin[ruleColor[3 * ri]];
+        const g = lin[ruleColor[3 * ri + 1]];
+        const bl = lin[ruleColor[3 * ri + 2]];
+        out[o] = out[o + 3] = r;
+        out[o + 1] = out[o + 4] = g;
+        out[o + 2] = out[o + 5] = bl;
+      } else {
+        const i = 3 * bonds[2 * b];
+        const j = 3 * bonds[2 * b + 1];
+        out[o] = lin[atomColor[i]];
+        out[o + 1] = lin[atomColor[i + 1]];
+        out[o + 2] = lin[atomColor[i + 2]];
+        out[o + 3] = lin[atomColor[j]];
+        out[o + 4] = lin[atomColor[j + 1]];
+        out[o + 5] = lin[atomColor[j + 2]];
+      }
+    }
+    mesh.instanceColor!.needsUpdate = true;
   }
 
   /** Matrix of the half-stick running from atom `from` to the midpoint of `from` and `to`. */
-  private writeHalfBond(a: Float32Array, o: number, from: number, to: number): void {
+  private writeHalfBond(a: Float32Array, o: number, from: number, to: number, r: number): void {
     const p = this.pos;
     const dx = p[3 * to] - p[3 * from];
     const dy = p[3 * to + 1] - p[3 * from + 1];
     const dz = p[3 * to + 2] - p[3 * from + 2];
     const len = Math.hypot(dx, dy, dz);
-    const r = this.bondRadius;
     const half = len / 2;
     this.v1.set(dx / len, dy / len, dz / len);
     this.q1.setFromUnitVectors(this.yAxis, this.v1);
@@ -759,7 +894,8 @@ export class StructureView {
   /** Size of the structure: sets `radius` (bounding sphere) and the default camera distance. */
   private measureExtent(): void {
     const { min, max } = this.model!.bounds;
-    const maxAtom = Math.max(0, ...this.baseRadius.slice(0, Math.min(this.baseRadius.length, 64)));
+    // Margin for the atom spheres at the edge; independent of the style so zoom is stable.
+    const maxAtom = Math.max(0, ...this.model!.info.map((i) => i.covalent));
     this.radius = Math.max(
       0.5,
       Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2 + maxAtom,
