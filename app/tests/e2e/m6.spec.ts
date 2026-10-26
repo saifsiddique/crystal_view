@@ -9,12 +9,9 @@ async function load(page: Page, name: string) {
   await expect(page.getByTestId('hud')).toContainText('atoms');
 }
 
-/** Open a collapsible section of the panel if it is closed. */
+/** Show a tab of the settings panel (Range, Bonds, Polyhedra, Appearance, Elements). */
 async function openSection(page: Page, title: string) {
-  const details = page.locator('details', { has: page.locator('summary', { hasText: title }) });
-  if (!(await details.first().evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await details.first().locator('summary').click();
-  }
+  await page.getByRole('tab', { name: title, exact: true }).click();
 }
 
 const hud = (page: Page) => page.getByTestId('hud');
@@ -124,6 +121,7 @@ test.describe('bonds', () => {
     await load(page, 'NaCl');
     await page.getByTestId('preset-cell').click();
     await expect(hud(page)).toContainText('8 atoms · 12 bonds');
+    await openSection(page, 'Bonds');
     await page.getByTestId('beyond').check();
     await expect(hud(page)).toContainText('32 atoms · 36 bonds');
     // an added atom says so in its tooltip
@@ -143,6 +141,7 @@ test.describe('bonds', () => {
 
   test('completing a framework warns that it cannot', async ({ page }) => {
     await load(page, 'NaCl');
+    await openSection(page, 'Bonds');
     await page.getByTestId('complete').check();
     await expect(page.getByRole('status')).toContainText('framework');
   });
@@ -151,6 +150,7 @@ test.describe('bonds', () => {
     page,
   }) => {
     await load(page, 'NaCl');
+    await openSection(page, 'Bonds');
     await expect(page.getByTestId('rules')).toContainText('Cl–Na');
     await setNumber(page, 'Cl-Na max', '2');
     await expect(hud(page)).toContainText('0 bonds');
@@ -171,6 +171,7 @@ test.describe('bonds', () => {
   test('a rule can be hidden or coloured without changing the bond count', async ({ page }) => {
     await load(page, 'NaCl');
     const before = await picture(page);
+    await openSection(page, 'Bonds');
     await page.getByLabel('Cl-Na shown').uncheck();
     await expect(hud(page)).toContainText('54 bonds');
     await expect.poll(async () => (await picture(page)) !== before).toBe(true);
@@ -200,6 +201,7 @@ test.describe('bonds', () => {
       return [];
     });
     expect(pair).toHaveLength(2);
+    await openSection(page, 'Bonds');
     const draw = page.getByTestId('draw-bond');
     await expect(draw).toBeDisabled();
     for (const i of pair) {
@@ -234,7 +236,9 @@ test.describe('polyhedra', () => {
     await page.getByTestId('poly-Cl').check();
     // closed cell: only the body-centre atom has all its neighbours
     await expect(page.getByTestId('poly-info')).toContainText('1 drawn, 26 skipped');
+    await openSection(page, 'Bonds');
     await page.getByTestId('beyond').check();
+    await openSection(page, 'Polyhedra');
     await expect(page.getByTestId('poly-info')).toContainText('27 drawn');
     // the atoms added beyond the range have polyhedra of their own, which are incomplete
     const info = await page.evaluate(() => window.__crystallens.polyhedra());
@@ -246,9 +250,10 @@ test.describe('polyhedra', () => {
     page,
   }) => {
     await load(page, 'NaCl');
+    await openSection(page, 'Bonds');
     await page.getByTestId('beyond').check();
-    await openSection(page, 'Polyhedra');
     const none = await picture(page);
+    await openSection(page, 'Polyhedra');
     await page.getByTestId('poly-Na').check();
     await expect.poll(async () => (await picture(page)) !== none).toBe(true);
     const solid = await picture(page);
@@ -281,6 +286,7 @@ test.describe('appearance and visibility', () => {
     const na = await firstVisible('Na')(page);
     expect(na).toBeGreaterThanOrEqual(0);
     const before = await picture(page);
+    await openSection(page, 'Elements');
     await page.getByLabel('show Na', { exact: true }).uncheck();
     await expect
       .poll(async () => {
@@ -299,6 +305,7 @@ test.describe('appearance and visibility', () => {
     const p = await page.evaluate((i) => window.__crystallens.atomScreen(i), cl);
     await page.mouse.click(p.x, p.y);
     expect(await page.evaluate(() => window.__crystallens.selection())).toEqual([cl]);
+    await openSection(page, 'Elements');
     await page.getByTestId('hide-selected').click();
     await expect(page.getByTestId('show-hidden')).toContainText('Show 1 hidden');
     await expect
@@ -313,6 +320,7 @@ test.describe('appearance and visibility', () => {
   test('a colour change is applied at once and the settings remember it', async ({ page }) => {
     await load(page, 'NaCl');
     const before = await picture(page);
+    await openSection(page, 'Elements');
     await page.getByLabel('Na colour', { exact: true }).fill('#00aa00');
     await expect.poll(async () => (await picture(page)) !== before).toBe(true);
     const s = await page.evaluate(() => window.__crystallens.settings());
@@ -328,8 +336,8 @@ test.describe('appearance and visibility', () => {
     page,
   }) => {
     await load(page, 'NaCl');
-    await openSection(page, 'Appearance');
     const before = await picture(page);
+    await openSection(page, 'Appearance');
     await page.getByTestId('scheme').selectOption('uniform');
     await expect.poll(async () => (await picture(page)) !== before).toBe(true);
     await page.getByTestId('scheme').selectOption('auto');
@@ -359,6 +367,7 @@ test.describe('appearance and visibility', () => {
     page,
   }) => {
     await load(page, 'NaCl');
+    await openSection(page, 'Elements');
     await page.getByLabel('Na colour', { exact: true }).fill('#00aa00');
     await page.getByTestId('style').selectOption('spaceFill');
     await page.getByTestId('cif-input').setInputFiles('tests/fixtures/cifs/Si.cif');

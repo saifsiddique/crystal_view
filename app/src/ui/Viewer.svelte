@@ -32,6 +32,7 @@
   } from '../core/orientation';
   import { StructureView } from '../render/structureView';
   import { orientation } from './orientation.svelte';
+  import Logo from './Logo.svelte';
   import ViewPanel from './ViewPanel.svelte';
 
   let { crystal }: { crystal: Crystal | null } = $props();
@@ -517,176 +518,282 @@
   }
 
   const hovered = $derived(hover ? describe(hover.atom) : null);
+
+  // ---- side panel: resizable and collapsible, remembered in this browser -------------------------
+
+  const PANEL_MIN = 280;
+  const PANEL_MAX = 900;
+  const PANEL_DEFAULT = 380;
+  const PANEL_KEY = 'crystallens.viewPanel';
+  let panelWidth = $state(PANEL_DEFAULT);
+  let panelCollapsed = $state(false);
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(PANEL_KEY) ?? 'null') as {
+      width?: unknown;
+      collapsed?: unknown;
+    } | null;
+    if (saved && typeof saved.width === 'number' && Number.isFinite(saved.width))
+      panelWidth = Math.min(PANEL_MAX, Math.max(PANEL_MIN, saved.width));
+    if (saved && typeof saved.collapsed === 'boolean') panelCollapsed = saved.collapsed;
+  } catch {
+    // no storage (private window, blocked site data): the defaults stand
+  }
+
+  function savePanel() {
+    try {
+      localStorage.setItem(
+        PANEL_KEY,
+        JSON.stringify({ width: panelWidth, collapsed: panelCollapsed }),
+      );
+    } catch {
+      // ignore: remembering the layout is a convenience
+    }
+  }
+
+  function setPanelWidth(w: number) {
+    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth * 0.6));
+    panelWidth = Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
+    savePanel();
+  }
+
+  function setCollapsed(on: boolean) {
+    panelCollapsed = on;
+    savePanel();
+  }
+
+  function startResize(e: PointerEvent) {
+    if (e.button !== 0) return;
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    const x0 = e.clientX;
+    const w0 = panelWidth;
+    const move = (ev: PointerEvent) => setPanelWidth(w0 + (x0 - ev.clientX));
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  }
+
+  function onHandleKey(e: KeyboardEvent) {
+    const d = e.shiftKey ? 80 : 20;
+    if (e.key === 'ArrowLeft') setPanelWidth(panelWidth + d);
+    else if (e.key === 'ArrowRight') setPanelWidth(panelWidth - d);
+    else return;
+    e.preventDefault();
+  }
 </script>
 
-<section aria-label="Structure viewer" data-testid="viewer">
-  <h2>Structure viewer</h2>
-  <div class="toolbar">
-    <label>
-      Style
-      <select bind:value={settings.appearance.displayStyle} data-testid="style">
-        <option value="ballStick">Ball and stick</option>
-        <option value="spaceFill">Space filling</option>
-        <option value="stick">Stick</option>
-      </select>
-    </label>
-    <label>
-      Projection
-      <select bind:value={settings.projection} data-testid="projection">
-        <option value="ortho">Orthographic</option>
-        <option value="persp">Perspective</option>
-      </select>
-    </label>
-    <label class="inline"><input type="checkbox" bind:checked={settings.showCell} /> Cell</label>
-    <label class="inline"><input type="checkbox" bind:checked={settings.showAxes} /> Axes</label>
-    <label class="inline"><input type="checkbox" bind:checked={settings.toon} /> Toon</label>
-    <label class="inline" title="Untick to draw no bonds at all">
-      <input type="checkbox" bind:checked={settings.appearance.bondsVisible} data-testid="bonds" />
-      Bonds
-    </label>
-    <label class="inline">
-      <input type="checkbox" bind:checked={measuring} data-testid="measure" /> Measure
-    </label>
-    <span class="group">
-      <button
-        type="button"
-        onclick={() => view?.resetOrientation()}
-        title="Default orientation and centring; the zoom stays">Reset view</button
-      >
-      <button
-        type="button"
-        onclick={() => view?.resetZoom()}
-        title="Magnification back to fit; orientation and pan stay">Reset zoom</button
-      >
-      <button type="button" onclick={resetRange} title="One cell with its boundary atoms, no slab"
-        >Reset range</button
-      >
-    </span>
-  </div>
+<section aria-label="Structure viewer" data-testid="viewer" class="viewer">
+  <h2 class="section-title">Structure viewer</h2>
 
-  {#if crystal}
-    <div class="orient" data-testid="orientation">
-      <form
-        class="group"
-        onsubmit={(e) => {
-          e.preventDefault();
-          if (uvwValue) viewAlongUvw(uvwValue);
-        }}
-      >
-        View along [
-        {#each [0, 1, 2] as k (k)}
+  <div class="toolbar card">
+    <fieldset class="tgroup" disabled={!crystal}>
+      <legend>Display</legend>
+      <div class="ctl">
+        <select
+          bind:value={settings.appearance.displayStyle}
+          data-testid="style"
+          aria-label="Style"
+          title="Drawing style"
+        >
+          <option value="ballStick">Ball and stick</option>
+          <option value="spaceFill">Space filling</option>
+          <option value="stick">Stick</option>
+        </select>
+        <select
+          bind:value={settings.projection}
+          data-testid="projection"
+          aria-label="Projection"
+          title="Projection"
+        >
+          <option value="ortho">Orthographic</option>
+          <option value="persp">Perspective</option>
+        </select>
+        <span class="chips">
+          <label class="chip"><input type="checkbox" bind:checked={settings.showCell} /> Cell</label
+          >
+          <label class="chip"><input type="checkbox" bind:checked={settings.showAxes} /> Axes</label
+          >
+          <label class="chip" title="Untick to draw no bonds at all">
+            <input
+              type="checkbox"
+              bind:checked={settings.appearance.bondsVisible}
+              data-testid="bonds"
+            /> Bonds
+          </label>
+          <label class="chip" title="Cartoon shading"
+            ><input type="checkbox" bind:checked={settings.toon} /> Toon</label
+          >
+        </span>
+      </div>
+    </fieldset>
+
+    <fieldset class="tgroup" disabled={!crystal} data-testid="orientation">
+      <legend>View direction</legend>
+      <div class="ctl">
+        <form
+          class="idxform"
+          onsubmit={(e) => {
+            e.preventDefault();
+            if (uvwValue) viewAlongUvw(uvwValue);
+          }}
+          title="View along a direction [uvw]"
+        >
+          along <span class="br">[</span>
+          {#each [0, 1, 2] as k (k)}
+            <input
+              class="idx"
+              bind:value={uvwInput[k]}
+              aria-label={`u v w, index ${k + 1}`}
+              data-testid={`uvw-${k}`}
+              inputmode="numeric"
+            />
+          {/each}
+          <span class="br">]</span>
+          <button type="submit" disabled={!uvwValue} data-testid="uvw-go">Go</button>
+        </form>
+        <form
+          class="idxform"
+          onsubmit={(e) => {
+            e.preventDefault();
+            if (hklValue) viewNormalToHkl(hklValue);
+          }}
+          title="View along the normal of a plane (hkl)"
+        >
+          normal to <span class="br">(</span>
+          {#each [0, 1, 2] as k (k)}
+            <input
+              class="idx"
+              bind:value={hklInput[k]}
+              aria-label={`h k l, index ${k + 1}`}
+              data-testid={`hkl-${k}`}
+              inputmode="numeric"
+            />
+          {/each}
+          <span class="br">)</span>
+          <button type="submit" disabled={!hklValue} data-testid="hkl-go">Go</button>
+        </form>
+        <span class="seg" role="group" aria-label="Quick views">
+          <button type="button" onclick={() => viewAlongUvw([1, 0, 0])} title="View along a"
+            >a</button
+          ><button type="button" onclick={() => viewAlongUvw([0, 1, 0])} title="View along b"
+            >b</button
+          ><button type="button" onclick={() => viewAlongUvw([0, 0, 1])} title="View along c"
+            >c</button
+          >
+        </span>
+        <span class="seg" role="group" aria-label="Quick views, reciprocal">
+          <button type="button" onclick={() => viewNormalToHkl([1, 0, 0])} title="View along a*"
+            >a*</button
+          ><button type="button" onclick={() => viewNormalToHkl([0, 1, 0])} title="View along b*"
+            >b*</button
+          ><button type="button" onclick={() => viewNormalToHkl([0, 0, 1])} title="View along c*"
+            >c*</button
+          >
+        </span>
+      </div>
+    </fieldset>
+
+    <fieldset class="tgroup" disabled={!crystal}>
+      <legend>Rotate</legend>
+      <div class="ctl">
+        <span class="seg" role="group" aria-label="Goniometer">
+          <button type="button" onclick={() => turn(-step, 0, 0)} aria-label="Tilt left">◀</button
+          ><button type="button" onclick={() => turn(step, 0, 0)} aria-label="Tilt right">▶</button
+          ><button type="button" onclick={() => turn(0, step, 0)} aria-label="Tilt up">▲</button
+          ><button type="button" onclick={() => turn(0, -step, 0)} aria-label="Tilt down">▼</button>
+        </span>
+        <label class="unit" title="Tilt step (arrow keys and buttons)">
           <input
             class="idx"
-            bind:value={uvwInput[k]}
-            aria-label={`u v w, index ${k + 1}`}
-            data-testid={`uvw-${k}`}
-            inputmode="numeric"
-          />
-        {/each}
-        ]
-        <button type="submit" disabled={!uvwValue} data-testid="uvw-go">Go</button>
-      </form>
-      <form
-        class="group"
-        onsubmit={(e) => {
-          e.preventDefault();
-          if (hklValue) viewNormalToHkl(hklValue);
-        }}
-      >
-        View normal to (
-        {#each [0, 1, 2] as k (k)}
-          <input
-            class="idx"
-            bind:value={hklInput[k]}
-            aria-label={`h k l, index ${k + 1}`}
-            data-testid={`hkl-${k}`}
-            inputmode="numeric"
-          />
-        {/each}
-        )
-        <button type="submit" disabled={!hklValue} data-testid="hkl-go">Go</button>
-      </form>
-      <span class="group" aria-label="Quick views">
-        Along
-        <button type="button" onclick={() => viewAlongUvw([1, 0, 0])}>a</button>
-        <button type="button" onclick={() => viewAlongUvw([0, 1, 0])}>b</button>
-        <button type="button" onclick={() => viewAlongUvw([0, 0, 1])}>c</button>
-        Normal to
-        <button type="button" onclick={() => viewNormalToHkl([1, 0, 0])}>a*</button>
-        <button type="button" onclick={() => viewNormalToHkl([0, 1, 0])}>b*</button>
-        <button type="button" onclick={() => viewNormalToHkl([0, 0, 1])}>c*</button>
-      </span>
-      <span class="group" aria-label="Goniometer">
-        Tilt
-        <button type="button" onclick={() => turn(-step, 0, 0)} aria-label="Tilt left">◀</button>
-        <button type="button" onclick={() => turn(step, 0, 0)} aria-label="Tilt right">▶</button>
-        <button type="button" onclick={() => turn(0, step, 0)} aria-label="Tilt up">▲</button>
-        <button type="button" onclick={() => turn(0, -step, 0)} aria-label="Tilt down">▼</button>
-        by
-        <input
-          class="idx"
-          type="number"
-          min="0.1"
-          max="90"
-          step="0.5"
-          bind:value={settings.tiltStep}
-          aria-label="Tilt step in degrees"
-          data-testid="tilt-step"
-        />°
-        <button type="button" onclick={() => turn(0, 0, -90)} title="Rotate 90° anticlockwise"
-          >⟲ 90°</button
-        >
-        <button type="button" onclick={() => turn(0, 0, 90)} title="Rotate 90° clockwise"
-          >⟳ 90°</button
-        >
-      </span>
-      <span class="group">
-        <button
-          type="button"
-          aria-pressed={settings.snapToZone}
-          class:on={settings.snapToZone}
-          onclick={() => (settings.snapToZone = !settings.snapToZone)}
-          title="When on, releasing a mouse rotation within the angle at right of a zone axis snaps onto it"
-          data-testid="snap">Snap to zone axis: {settings.snapToZone ? 'on' : 'off'}</button
-        >
-        within
-        <input
-          class="idx"
-          type="number"
-          min="0.1"
-          max="45"
-          step="0.5"
-          bind:value={settings.snapDegrees}
-          aria-label="Snap angle in degrees"
-          data-testid="snap-degrees"
-        />° of axes up to index
-        <input
-          class="idx"
-          type="number"
-          min="1"
-          max="6"
-          step="1"
-          bind:value={settings.snapMaxIndex}
-          aria-label="Largest zone-axis index to snap to"
-          data-testid="snap-index"
-        />
-      </span>
-      <span class="readout" data-testid="orientation-readout">
-        {#if orientation.ready && orientation.uvw && orientation.hkl}
-          Looking along [{orientation.uvw.indices.join(' ')}] ({fmt(orientation.uvw.angleDeg, 2)}°
-          off) · normal to ({orientation.hkl.indices.join(' ')}) ({fmt(
-            orientation.hkl.angleDeg,
-            2,
-          )}° off)
-        {/if}
-      </span>
-    </div>
-  {/if}
+            type="number"
+            min="0.1"
+            max="90"
+            step="0.5"
+            bind:value={settings.tiltStep}
+            aria-label="Tilt step in degrees"
+            data-testid="tilt-step"
+          />°
+        </label>
+        <span class="seg" role="group" aria-label="Rotate about the view axis">
+          <button type="button" onclick={() => turn(0, 0, -90)} title="Rotate 90° anticlockwise"
+            >⟲ 90°</button
+          ><button type="button" onclick={() => turn(0, 0, 90)} title="Rotate 90° clockwise"
+            >⟳ 90°</button
+          >
+        </span>
+        <span class="snap">
+          <button
+            type="button"
+            aria-pressed={settings.snapToZone}
+            onclick={() => (settings.snapToZone = !settings.snapToZone)}
+            title="When on, releasing a mouse rotation close to a low-index zone axis snaps onto it"
+            data-testid="snap">Snap: {settings.snapToZone ? 'on' : 'off'}</button
+          >
+          <label class="unit" title="Snap when within this angle">
+            ≤
+            <input
+              class="idx"
+              type="number"
+              min="0.1"
+              max="45"
+              step="0.5"
+              bind:value={settings.snapDegrees}
+              aria-label="Snap angle in degrees"
+              data-testid="snap-degrees"
+            />°
+          </label>
+          <label class="unit" title="Only zone axes with indices up to this">
+            index ≤
+            <input
+              class="idx"
+              type="number"
+              min="1"
+              max="6"
+              step="1"
+              bind:value={settings.snapMaxIndex}
+              aria-label="Largest zone-axis index to snap to"
+              data-testid="snap-index"
+            />
+          </label>
+        </span>
+      </div>
+    </fieldset>
+
+    <fieldset class="tgroup" disabled={!crystal}>
+      <legend>Tools</legend>
+      <div class="ctl">
+        <label class="chip" title="Click 2, 3 or 4 atoms for a distance, angle or torsion">
+          <input type="checkbox" bind:checked={measuring} data-testid="measure" /> Measure
+        </label>
+        <span class="seg" role="group" aria-label="Reset">
+          <button
+            type="button"
+            onclick={() => view?.resetOrientation()}
+            title="Default orientation and centring; the zoom stays">Reset view</button
+          ><button
+            type="button"
+            onclick={() => view?.resetZoom()}
+            title="Magnification back to fit; orientation and pan stay">Reset zoom</button
+          ><button
+            type="button"
+            onclick={resetRange}
+            title="One cell with its boundary atoms, no slab">Reset range</button
+          >
+        </span>
+      </div>
+    </fieldset>
+  </div>
 
   <div class="layout" class:withPanel={crystal !== null}>
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
-      class="stage"
+      class="stage card"
       bind:this={stage}
       style:background={settings.appearance.background}
       tabindex="0"
@@ -699,10 +806,23 @@
       <canvas bind:this={labelCanvas} class="overlay" data-testid="label-canvas"></canvas>
 
       {#if !crystal}
-        <p class="empty">Load a CIF to see its structure.</p>
+        <div class="empty">
+          <Logo size={56} />
+          <p>Open a CIF above to see its structure.</p>
+        </div>
       {/if}
       {#if error}
         <p class="empty err" role="alert">{error}</p>
+      {/if}
+
+      {#if crystal}
+        <span class="readout" data-testid="orientation-readout">
+          {#if orientation.ready && orientation.uvw && orientation.hkl}
+            along [{orientation.uvw.indices.join(' ')}] ({fmt(orientation.uvw.angleDeg, 2)}° off) ·
+            normal to ({orientation.hkl.indices.join(' ')}) ({fmt(orientation.hkl.angleDeg, 2)}°
+            off)
+          {/if}
+        </span>
       {/if}
 
       {#each measurements as m, i (i)}
@@ -736,16 +856,44 @@
     </div>
 
     {#if crystal}
-      <aside class="side">
-        <ViewPanel
-          {crystal}
-          {model}
-          {selection}
-          bind:settings
-          {polyhedraInfo}
-          onHideSelected={hideSelected}
-        />
-      </aside>
+      {#if panelCollapsed}
+        <button
+          type="button"
+          class="rail card"
+          onclick={() => setCollapsed(false)}
+          title="Show the settings panel"
+          data-testid="panel-expand"><span>⟨</span><span class="vtext">Settings</span></button
+        >
+      {:else}
+        <!-- a focusable separator is the WAI-ARIA window-splitter pattern -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+        <div
+          class="handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the settings panel"
+          aria-valuenow={panelWidth}
+          aria-valuemin={PANEL_MIN}
+          aria-valuemax={PANEL_MAX}
+          tabindex="0"
+          title="Drag to resize; double-click for the default width"
+          onpointerdown={startResize}
+          ondblclick={() => setPanelWidth(PANEL_DEFAULT)}
+          onkeydown={onHandleKey}
+          data-testid="panel-handle"
+        ></div>
+        <aside class="side card" style:width={`${panelWidth}px`} data-testid="side-panel">
+          <ViewPanel
+            {crystal}
+            {model}
+            {selection}
+            bind:settings
+            {polyhedraInfo}
+            onHideSelected={hideSelected}
+            onCollapse={() => setCollapsed(true)}
+          />
+        </aside>
+      {/if}
     {/if}
   </div>
 
@@ -753,88 +901,231 @@
     <p class="warn" role="status">{w}</p>
   {/each}
   <p class="hint">
-    Drag to rotate, wheel to zoom, right-drag to pan; click the view and use the arrow keys to tilt
-    (Shift: 1°, Ctrl: 15°, Alt+Left/Right: roll). Click an atom to select it; turn on Measure and
-    click 2, 3 or 4 atoms for a distance, angle or torsion.
+    <kbd>drag</kbd> rotate · <kbd>wheel</kbd> zoom · <kbd>right-drag</kbd> pan · click the view,
+    then
+    <kbd>←↑→↓</kbd> tilt (<kbd>Shift</kbd> 1°, <kbd>Ctrl</kbd> 15°, <kbd>Alt</kbd>+<kbd>←→</kbd> roll)
+    · click an atom to select it; with Measure on, 2, 3 or 4 atoms give a distance, angle or torsion.
   </p>
 </section>
 
 <style>
-  section {
-    margin: 2rem 0;
+  .viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
   }
-  h2 {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text-h);
+  .section-title {
+    margin: 0.5rem 0 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
+
+  /* ---- toolbar: labelled groups of controls ---- */
   .toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem 1rem;
-    align-items: center;
-    margin-bottom: 0.6rem;
-    font-size: 0.85rem;
+    gap: 0;
+    padding: 0.35rem 0.4rem;
+    font-size: 0.84rem;
   }
-  .group {
-    display: inline-flex;
-    gap: 0.3rem;
-    align-items: center;
+  .tgroup {
+    margin: 0;
+    padding: 0.25rem 0.85rem 0.35rem;
+    border: none;
+    border-right: 1px solid var(--border);
+    min-width: 0;
   }
-  .orient {
+  .tgroup:last-child {
+    border-right: none;
+  }
+  .tgroup:disabled {
+    opacity: 0.55;
+  }
+  legend {
+    float: left;
+    width: 100%;
+    padding: 0;
+    margin-bottom: 0.25rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .ctl {
+    clear: both;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem 1rem;
     align-items: center;
-    margin-bottom: 0.6rem;
-    font-size: 0.85rem;
+    gap: 0.4rem 0.6rem;
+  }
+  .chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem 0.15rem 0.4rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    cursor: pointer;
+    user-select: none;
+  }
+  .chip:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .chip input {
+    margin: 0;
+  }
+  /* segmented button groups */
+  .seg {
+    display: inline-flex;
+  }
+  .seg > button {
+    border-radius: 0;
+    margin-left: -1px;
+    min-width: 2rem;
+  }
+  .seg > button:first-child {
+    border-radius: 6px 0 0 6px;
+    margin-left: 0;
+  }
+  .seg > button:last-child {
+    border-radius: 0 6px 6px 0;
+  }
+  .seg > button:hover:not(:disabled) {
+    position: relative;
+    z-index: 1;
+  }
+  .idxform {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+  .br {
+    font-family: var(--mono);
+    color: var(--muted);
   }
   .idx {
-    width: 3rem;
-    padding: 0.1rem 0.25rem;
+    width: 2.6rem;
+    padding: 0.15rem 0.2rem;
     text-align: center;
   }
-  button.on {
-    background: #dbe7ff;
-    border-color: #6b8fd6;
-  }
-  .readout {
-    font: 0.8rem var(--mono);
-    color: #3a4a66;
-  }
-  .stage:focus-visible {
-    outline: 2px solid #6b8fd6;
-    outline-offset: 1px;
-  }
-  .inline {
+  .unit {
     display: inline-flex;
-    gap: 0.3rem;
     align-items: center;
+    gap: 0.2rem;
   }
+  .snap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding-left: 0.6rem;
+    border-left: 1px dashed var(--border);
+  }
+
+  /* ---- stage and side panel ---- */
   .layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-  .layout.withPanel {
-    grid-template-columns: minmax(0, 1fr) 21rem;
-  }
-  @media (max-width: 60rem) {
-    .layout.withPanel {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-  .side {
-    height: 32rem;
-    overflow: hidden;
+    display: flex;
+    align-items: stretch;
+    height: clamp(28rem, calc(100vh - 22.5rem), 70rem);
   }
   .stage {
     position: relative;
-    height: 32rem;
-    border: 1px solid var(--border, #c9ced8);
-    border-radius: 6px;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     touch-action: none;
+  }
+  .stage:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .handle {
+    flex: none;
+    width: 0.75rem;
+    cursor: col-resize;
+    position: relative;
+    touch-action: none;
+  }
+  .handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 2.5rem;
+    transform: translate(-50%, -50%);
+    border-radius: 2px;
+    background: var(--border-strong);
+    transition: background 0.12s;
+  }
+  .handle:hover::after,
+  .handle:focus-visible::after {
+    background: var(--accent);
+  }
+  .handle:focus-visible {
+    outline: none;
+  }
+  .side {
+    flex: none;
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .rail {
+    flex: none;
+    margin-left: 0.75rem;
+    width: 2.4rem;
+    padding: 0.6rem 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    border-radius: var(--radius);
+    color: var(--text);
+  }
+  .vtext {
+    writing-mode: vertical-rl;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+  @media (max-width: 60rem) {
+    .layout.withPanel {
+      flex-direction: column;
+      height: auto;
+      gap: 0.75rem;
+    }
+    .layout.withPanel .stage {
+      height: 60vh;
+      min-height: 22rem;
+      flex: none;
+    }
+    .layout.withPanel .side {
+      width: auto !important;
+      height: 28rem;
+    }
+    .handle {
+      display: none;
+    }
+    .rail {
+      margin-left: 0;
+      width: auto;
+      flex-direction: row;
+      justify-content: center;
+    }
+    .vtext {
+      writing-mode: horizontal-tb;
+    }
   }
   canvas {
     position: absolute;
@@ -854,26 +1145,48 @@
   .empty {
     position: absolute;
     inset: 0;
-    display: grid;
-    place-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
     margin: 0;
     pointer-events: none;
     color: #5b6578;
+  }
+  .empty p {
+    margin: 0;
   }
   .err {
     color: var(--err);
   }
   .warn {
-    margin: 0.4rem 0 0;
-    font-size: 0.8rem;
-    color: #8a5a00;
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--warn);
+  }
+  .readout {
+    position: absolute;
+    left: 0.6rem;
+    top: 0.6rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    color: #27304a;
+    font: 0.78rem var(--mono);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .readout:empty {
+    display: none;
   }
   .tip {
     position: absolute;
     pointer-events: none;
     padding: 0.35rem 0.55rem;
-    border-radius: 4px;
-    background: rgba(20, 24, 33, 0.9);
+    border-radius: 6px;
+    background: rgba(20, 24, 33, 0.92);
     color: #f1f3f8;
     font: 0.75rem/1.35 var(--mono);
     white-space: nowrap;
@@ -893,14 +1206,26 @@
   }
   .hud {
     position: absolute;
-    right: 0.5rem;
-    bottom: 0.4rem;
+    right: 0.6rem;
+    bottom: 0.45rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.6);
     font: 0.7rem var(--mono);
     color: #5b6578;
     pointer-events: none;
   }
   .hint {
-    margin: 0.5rem 0 0;
-    font-size: 0.8rem;
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  kbd {
+    padding: 0 0.3rem;
+    border: 1px solid var(--border-strong);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font: 0.72rem var(--mono);
+    background: var(--surface);
   }
 </style>

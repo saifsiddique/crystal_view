@@ -652,6 +652,14 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - Gotcha: `<output>` has the ARIA role `status`; it collided with the M6 warning test's `getByRole('status')`. The readout is a `<span>`.
 - Not done: four-index (Miller-Bravais) input for hexagonal cells; the 3-index form works.
 
+**Page redesign after M7 (2026-10-26, asked by the user before M8).**
+- `app.css` holds the theme tokens (`--surface`, `--accent`, `--muted`, ... with a dark set) and shared button/input/`.card` styles; components use the tokens.
+- `App.svelte`: header with the centred logo (`ui/Logo.svelte`, same mark as `public/favicon.svg`) and title; the pipeline check is a status pill at the top right (`<details>`; the testids `worker-status`/`kernel-status` live inside it).
+- `ui/LoadBar.svelte` owns opening a CIF (button, drag and drop, data-block chooser, `cif-input` and `error` testids) and sits above the viewer; it calls `onLoad({crystal, fileName, warnings})`. `Inspector.svelte` now only displays: props `crystal`, `fileName`, `warnings`, in cards ("Crystal data"); the asymmetric unit is a `<details>` (`asymmetric-unit`).
+- Viewer toolbar: four `<fieldset>` groups (Display, View direction, Rotate, Tools), disabled with no crystal. The orientation readout is an overlay at the top left of the stage. Stage height `clamp(28rem, 100vh - 22.5rem, 70rem)`.
+- Side panel: `ViewPanel` is tabbed (ARIA tabs; only the active tab is rendered, so e2e tests must click the tab first: `openSection` in m6.spec.ts does that). It collapses to a rail (`panel-collapse`/`panel-expand`) and resizes with a separator handle (`panel-handle`, drag, arrow keys, double-click = 380 px); width and collapsed state in localStorage key `crystallens.viewPanel` (try/catch). The bond-rule table is `table-layout: fixed` so no tab scrolls sideways at 280 px+.
+- `tests/e2e/layout.spec.ts` (6 tests) covers all of this.
+
 ---
 
 ### M8: Kinematic electron diffraction, indexed  *(5–7 d)*

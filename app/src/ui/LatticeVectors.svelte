@@ -112,7 +112,9 @@
 
 <style>
   .lattice {
-    margin: 0.5rem 0 1rem;
+    margin: 0.25rem 0 0;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
   }
   summary {
     cursor: pointer;

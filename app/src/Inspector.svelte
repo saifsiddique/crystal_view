@@ -1,8 +1,8 @@
 <script lang="ts">
-  // Temporary developer view of the core library (M1-M4): load a CIF, see what the parser, the
-  // symmetry code and the lattice maths make of it. M14 replaces this with the real UI.
-  import { parseCif, toP1Structure, writeCif, type BlockOutcome } from './core/cif';
-  import { buildCrystal, type Crystal } from './core/crystal';
+  // Crystal data read from the CIF (M1-M4): what the parser, the symmetry code and the lattice
+  // maths make of the loaded structure, plus small calculators. M14 reorganises this into tabs.
+  import { toP1Structure, writeCif } from './core/cif';
+  import type { Crystal } from './core/crystal';
   import { density } from './core/density';
   import {
     angleDirectionToPlaneNormal,
@@ -25,51 +25,22 @@
   import LatticeVectors from './ui/LatticeVectors.svelte';
   import SpaceGroupSymbol from './ui/SpaceGroupSymbol.svelte';
 
-  let { onCrystal }: { onCrystal?: (crystal: Crystal | null) => void } = $props();
+  let {
+    crystal,
+    fileName,
+    warnings,
+  }: { crystal: Crystal | null; fileName: string; warnings: string[] } = $props();
 
-  let fileName = $state('');
   let error = $state('');
-  let outcomes = $state.raw<BlockOutcome[]>([]);
-  let block = $state(0);
-  let crystal = $state.raw<Crystal | null>(null);
-  let warnings = $state<string[]>([]);
   let detected = $state.raw<DetectedSymmetry | null>(null);
   let detecting = $state(false);
 
-  function select(index: number) {
-    block = index;
+  // A new structure forgets the previous detection result.
+  $effect(() => {
+    void crystal;
     detected = null;
-    crystal = null;
-    onCrystal?.(null);
-    warnings = [];
-    const o = outcomes[index];
-    if (!o?.structure) return;
-    try {
-      const built = buildCrystal(o.structure);
-      crystal = built.crystal;
-      onCrystal?.(built.crystal);
-      warnings = [...o.warnings, ...built.warnings].map((w) => w.message);
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
-  }
-
-  async function onFile(event: Event) {
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (!file) return;
-    fileName = file.name;
     error = '';
-    outcomes = [];
-    crystal = null;
-    try {
-      outcomes = parseCif(await file.text());
-      const first = outcomes.findIndex((o) => o.structure);
-      if (first === -1) error = outcomes[0]?.error ?? 'No structure found in this file.';
-      else select(first);
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
-  }
+  });
 
   async function detect() {
     if (!crystal) return;
@@ -155,232 +126,295 @@
   });
 </script>
 
-<section aria-label="Core inspector">
-  <h2>Core inspector</h2>
-  <p class="hint">Load a CIF to see how the parser, symmetry code and lattice maths read it.</p>
-  <input type="file" accept=".cif,.txt" onchange={onFile} data-testid="cif-input" />
-  {#if error}<p class="err" data-testid="error">{error}</p>{/if}
+<section aria-label="Crystal data" class="inspector">
+  <h2 class="section-title">Crystal data</h2>
 
-  {#if outcomes.length > 1}
-    <label>
-      Data block
-      <select value={block} onchange={(e) => select(Number(e.currentTarget.value))}>
-        {#each outcomes as o, i (i)}
-          <option value={i} disabled={!o.structure}
-            >{o.name}{o.structure ? '' : ' (no structure)'}</option
+  <div class="cards">
+    {#if crystal}
+      {@const c = crystal}
+      <article class="card wide">
+        <header>
+          <h3 data-testid="crystal-title">{c.name}</h3>
+          <span class="muted">{fileName}</span>
+        </header>
+        {#if c.title}<p class="hint">{c.title}</p>{/if}
+        <dl data-testid="crystal-summary">
+          <dt>Cell (Å, °)</dt>
+          <dd>
+            {fmt(c.cell.a)}
+            {fmt(c.cell.b)}
+            {fmt(c.cell.c)} · {fmt(c.cell.alpha, 3)}
+            {fmt(c.cell.beta, 3)}
+            {fmt(c.cell.gamma, 3)}
+          </dd>
+          <dt>Volume</dt>
+          <dd>{fmt(c.summary.volume, 3)} Å³</dd>
+          <dt>Space group</dt>
+          <dd data-testid="space-group">
+            {#if c.spaceGroup.symbol}<SpaceGroupSymbol symbol={c.spaceGroup.symbol} />{/if}
+            (No. {c.spaceGroup.number ?? '?'}, {c.spaceGroup.crystalSystem ?? 'unknown'}),
+            {c.spaceGroup.order} operations, from {c.spaceGroup.source}
+          </dd>
+          <dt>Declared</dt>
+          <dd>{c.spaceGroup.declared.hm ?? '–'} · number {c.spaceGroup.declared.number ?? '–'}</dd>
+          <dt>Content</dt>
+          <dd data-testid="formula">
+            {c.summary.formula}{c.summary.Z ? `, Z = ${c.summary.Z}` : ''} · {c.sites.length} sites →
+            {c.atoms.length} atoms in {c.positions.length} positions
+          </dd>
+          <dt>Density</dt>
+          <dd>{fmt(density(c), 3)} g/cm³</dd>
+        </dl>
+
+        <div class="actions">
+          <button onclick={detect} disabled={detecting} data-testid="detect">
+            {detecting ? 'Detecting…' : 'Detect symmetry from positions'}
+          </button>
+          <button onclick={() => download(writeCif(toP1Structure(c)), `${c.name}_P1.cif`)}>
+            Download P1 cell
+          </button>
+          {#if detected}
+            <span data-testid="detected" class="detected">
+              detected <SpaceGroupSymbol symbol={detected.hmSymbol} /> (No. {detected.number},
+              {detected.pearsonSymbol})
+              {detected.number === c.spaceGroup.number
+                ? '✓ matches the CIF'
+                : '≠ the CIF declares ' + c.spaceGroup.number}
+            </span>
+          {/if}
+        </div>
+        {#if error}<p class="err">{error}</p>{/if}
+
+        {#if warnings.length}
+          <details class="warnings">
+            <summary
+              >{warnings.length} warning{warnings.length === 1 ? '' : 's'} while reading</summary
+            >
+            <ul>
+              {#each warnings as w, i (i)}<li>{w}</li>{/each}
+            </ul>
+          </details>
+        {/if}
+
+        <LatticeVectors crystal={c} />
+
+        <details class="fold" open data-testid="asymmetric-unit">
+          <summary>Asymmetric unit ({c.sites.length} site{c.sites.length === 1 ? '' : 's'})</summary
           >
-        {/each}
-      </select>
-    </label>
-  {/if}
+          <div class="scroll">
+            <table>
+              <thead
+                ><tr
+                  ><th>label</th><th>element</th><th>x</th><th>y</th><th>z</th><th>occ</th><th
+                    >mult</th
+                  ></tr
+                ></thead
+              >
+              <tbody>
+                {#each c.sites as site (site.index)}
+                  <tr>
+                    <td>{site.label}</td><td>{site.typeSymbol ?? site.element}</td>
+                    <td>{fmt(site.frac[0])}</td><td>{fmt(site.frac[1])}</td><td
+                      >{fmt(site.frac[2])}</td
+                    >
+                    <td>{site.occupancy}</td><td>{site.multiplicity}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </article>
 
-  {#if crystal}
-    {@const c = crystal}
-    <h3 data-testid="crystal-title">{fileName} · {c.name}</h3>
-    {#if c.title}<p class="hint">{c.title}</p>{/if}
-    <dl data-testid="crystal-summary">
-      <dt>Cell (Å, °)</dt>
-      <dd>
-        {fmt(c.cell.a)}
-        {fmt(c.cell.b)}
-        {fmt(c.cell.c)} · {fmt(c.cell.alpha, 3)}
-        {fmt(c.cell.beta, 3)}
-        {fmt(c.cell.gamma, 3)}
-      </dd>
-      <dt>Volume</dt>
-      <dd>{fmt(c.summary.volume, 3)} Å³</dd>
-      <dt>Space group</dt>
-      <dd data-testid="space-group">
-        {#if c.spaceGroup.symbol}<SpaceGroupSymbol symbol={c.spaceGroup.symbol} />{/if}
-        (No. {c.spaceGroup.number ?? '?'}, {c.spaceGroup.crystalSystem ?? 'unknown'}),
-        {c.spaceGroup.order} operations, from {c.spaceGroup.source}
-      </dd>
-      <dt>Declared</dt>
-      <dd>{c.spaceGroup.declared.hm ?? '–'} · number {c.spaceGroup.declared.number ?? '–'}</dd>
-      <dt>Content</dt>
-      <dd data-testid="formula">
-        {c.summary.formula}{c.summary.Z ? `, Z = ${c.summary.Z}` : ''} · {c.sites.length} sites →
-        {c.atoms.length} atoms in {c.positions.length} positions
-      </dd>
-      <dt>Density</dt>
-      <dd>{fmt(density(c), 3)} g/cm³</dd>
-    </dl>
+      <article class="card">
+        <header><h3>Lattice calculator</h3></header>
+        <div class="row">
+          <span>direction [uvw]</span>
+          {#each [0, 1, 2] as i (i)}<input
+              type="number"
+              step="1"
+              bind:value={uvw[i]}
+              aria-label={'uvw ' + i}
+            />{/each}
+        </div>
+        <div class="row">
+          <span>plane (hkl)</span>
+          {#each [0, 1, 2] as i (i)}<input
+              type="number"
+              step="1"
+              bind:value={hkl[i]}
+              aria-label={'hkl ' + i}
+            />{/each}
+        </div>
+        {#if calc}
+          <dl data-testid="lattice-calc">
+            <dt>|[uvw]|</dt>
+            <dd>{fmt(calc.length)} Å</dd>
+            <dt>d(hkl)</dt>
+            <dd>{fmt(calc.d)} Å</dd>
+            <dt>angle [uvw] ↔ (hkl) normal</dt>
+            <dd>{fmt(calc.angle, 3)}°</dd>
+            <dt>plane normal to [uvw] ∝ (hkl)</dt>
+            <dd>
+              ({calc.planeNormalOfUvw.map((x) => fmt(x, 3)).join(', ')}) ≈ ({calc.nearest.indices.join(
+                ' ',
+              )}), off by {fmt(calc.nearest.angleDeg, 3)}°
+            </dd>
+          </dl>
+        {/if}
+      </article>
 
-    <LatticeVectors crystal={c} />
-
-    <p>
-      <button onclick={detect} disabled={detecting} data-testid="detect">
-        {detecting ? 'Detecting…' : 'Detect symmetry from positions'}
-      </button>
-      <button onclick={() => download(writeCif(toP1Structure(c)), `${c.name}_P1.cif`)}>
-        Download P1 cell
-      </button>
-      {#if detected}
-        <span data-testid="detected">
-          detected <SpaceGroupSymbol symbol={detected.hmSymbol} /> (No. {detected.number},
-          {detected.pearsonSymbol})
-          {detected.number === c.spaceGroup.number
-            ? '✓ matches the CIF'
-            : '≠ the CIF declares ' + c.spaceGroup.number}
-        </span>
-      {/if}
-    </p>
-
-    {#if warnings.length}
-      <details open>
-        <summary>{warnings.length} warning{warnings.length === 1 ? '' : 's'}</summary>
-        <ul>
-          {#each warnings as w, i (i)}<li>{w}</li>{/each}
-        </ul>
-      </details>
-    {/if}
-
-    <h3>Asymmetric unit</h3>
-    <table>
-      <thead
-        ><tr
-          ><th>label</th><th>element</th><th>x</th><th>y</th><th>z</th><th>occ</th><th>mult</th></tr
-        ></thead
-      >
-      <tbody>
-        {#each c.sites as site (site.index)}
-          <tr>
-            <td>{site.label}</td><td>{site.typeSymbol ?? site.element}</td>
-            <td>{fmt(site.frac[0])}</td><td>{fmt(site.frac[1])}</td><td>{fmt(site.frac[2])}</td>
-            <td>{site.occupancy}</td><td>{site.multiplicity}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-
-    <h3>Lattice calculator</h3>
-    <div class="row">
-      <span>direction [uvw]</span>
-      {#each [0, 1, 2] as i (i)}<input
-          type="number"
-          step="1"
-          bind:value={uvw[i]}
-          aria-label={'uvw ' + i}
-        />{/each}
-      <span>plane (hkl)</span>
-      {#each [0, 1, 2] as i (i)}<input
-          type="number"
-          step="1"
-          bind:value={hkl[i]}
-          aria-label={'hkl ' + i}
-        />{/each}
-    </div>
-    {#if calc}
-      <dl data-testid="lattice-calc">
-        <dt>|[uvw]|</dt>
-        <dd>{fmt(calc.length)} Å</dd>
-        <dt>d(hkl)</dt>
-        <dd>{fmt(calc.d)} Å</dd>
-        <dt>angle [uvw] ↔ (hkl) normal</dt>
-        <dd>{fmt(calc.angle, 3)}°</dd>
-        <dt>plane normal to [uvw] ∝ (hkl)</dt>
-        <dd>
-          ({calc.planeNormalOfUvw.map((x) => fmt(x, 3)).join(', ')}) ≈ ({calc.nearest.indices.join(
-            ' ',
-          )}), off by {fmt(calc.nearest.angleDeg, 3)}°
-        </dd>
-      </dl>
-    {/if}
-
-    <h3>Largest d-spacings</h3>
-    <div class="row">
-      <span>radiation</span>
-      <select bind:value={lineId} aria-label="radiation" data-testid="radiation">
-        {#each XRAY_LINES as l (l.id)}<option value={l.id}
-            >{l.label} ({l.lambda.toFixed(4)} Å)</option
-          >{/each}
-      </select>
-    </div>
-    <table>
-      <thead
-        ><tr
-          ><th>(hkl)</th><th>d (Å)</th><th>2θ (°)</th><th>s = 1/2d</th><th>F² X-ray (rel.)</th></tr
-        ></thead
-      >
-      <tbody>
-        {#each planes as p (p.d)}
-          {@const F2 = (() => {
-            let re = 0,
-              im = 0;
-            for (const a of c.atoms) {
-              const ph =
-                2 * Math.PI * (p.hkl[0] * a.frac[0] + p.hkl[1] * a.frac[1] + p.hkl[2] * a.frac[2]);
-              const f = a.occupancy * fx(a.element, sFromD(p.d));
-              re += f * Math.cos(ph);
-              im += f * Math.sin(ph);
-            }
-            return re * re + im * im;
-          })()}
-          <tr
-            ><td>{p.hkl.join(' ')}</td><td>{fmt(p.d)}</td><td
-              >{fmt(twoThetaFromD(p.d, lambda), 3)}</td
-            ><td>{fmt(sFromD(p.d))}</td><td>{F2 < 1e-6 ? '0 (absent)' : fmt(F2, 1)}</td></tr
-          >
-        {/each}
-      </tbody>
-    </table>
-  {/if}
-
-  <h3>Scattering factors</h3>
-  <div class="row">
-    <span>species</span><input type="text" bind:value={speciesText} aria-label="species" size="6" />
-    <select bind:value={angleMode} aria-label="angle input">
-      <option value="twoTheta">2θ (°)</option>
-      <option value="s">s = sinθ/λ (Å⁻¹)</option>
-    </select>
-    {#if angleMode === 'twoTheta'}
-      <input type="number" step="1" min="0" max="180" bind:value={twoTheta} aria-label="2θ" />
-      <select bind:value={lineId} aria-label="wavelength">
-        {#each XRAY_LINES as l (l.id)}<option value={l.id}>{l.label}</option>{/each}
-      </select>
+      <article class="card">
+        <header>
+          <h3>Largest d-spacings</h3>
+          <select bind:value={lineId} aria-label="radiation" data-testid="radiation">
+            {#each XRAY_LINES as l (l.id)}<option value={l.id}
+                >{l.label} ({l.lambda.toFixed(4)} Å)</option
+              >{/each}
+          </select>
+        </header>
+        <div class="scroll">
+          <table>
+            <thead
+              ><tr
+                ><th>(hkl)</th><th>d (Å)</th><th>2θ (°)</th><th>s = 1/2d</th><th>F² X-ray (rel.)</th
+                ></tr
+              ></thead
+            >
+            <tbody>
+              {#each planes as p (p.d)}
+                {@const F2 = (() => {
+                  let re = 0,
+                    im = 0;
+                  for (const a of c.atoms) {
+                    const ph =
+                      2 *
+                      Math.PI *
+                      (p.hkl[0] * a.frac[0] + p.hkl[1] * a.frac[1] + p.hkl[2] * a.frac[2]);
+                    const f = a.occupancy * fx(a.element, sFromD(p.d));
+                    re += f * Math.cos(ph);
+                    im += f * Math.sin(ph);
+                  }
+                  return re * re + im * im;
+                })()}
+                <tr
+                  ><td>{p.hkl.join(' ')}</td><td>{fmt(p.d)}</td><td
+                    >{fmt(twoThetaFromD(p.d, lambda), 3)}</td
+                  ><td>{fmt(sFromD(p.d))}</td><td>{F2 < 1e-6 ? '0 (absent)' : fmt(F2, 1)}</td></tr
+                >
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </article>
     {:else}
-      <input type="number" step="0.05" min="0" bind:value={sInput} aria-label="s" />
+      <p class="empty card wide">
+        Open a CIF to see its cell, symmetry, sites and lattice vectors.
+      </p>
     {/if}
+
+    <article class="card">
+      <header><h3>Scattering factors</h3></header>
+      <div class="row">
+        <span>species</span><input
+          type="text"
+          bind:value={speciesText}
+          aria-label="species"
+          size="6"
+        />
+        <select bind:value={angleMode} aria-label="angle input">
+          <option value="twoTheta">2θ (°)</option>
+          <option value="s">s = sinθ/λ (Å⁻¹)</option>
+        </select>
+        {#if angleMode === 'twoTheta'}
+          <input type="number" step="1" min="0" max="180" bind:value={twoTheta} aria-label="2θ" />
+          <select bind:value={lineId} aria-label="wavelength">
+            {#each XRAY_LINES as l (l.id)}<option value={l.id}>{l.label}</option>{/each}
+          </select>
+        {:else}
+          <input type="number" step="0.05" min="0" bind:value={sInput} aria-label="s" />
+        {/if}
+      </div>
+      <p class="hint">
+        s = {fmt(s)} Å⁻¹, d = {fmt(1 / (2 * s), 3)} Å{#if angleMode === 's'}, 2θ = {fmt(
+            twoThetaFromS(s, lambda),
+            3,
+          )}° with {(XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).label}{/if}.
+      </p>
+      {#if scat.error}
+        <p class="err">{scat.error}</p>
+      {:else if scat.info}
+        <dl data-testid="scattering">
+          <dt>{scat.info.name} (Z = {scat.info.Z})</dt>
+          <dd>
+            <span class="swatch" style:background={scat.info.color}></span> mass {scat.info.mass} u ·
+            covalent
+            {scat.info.covalentRadius} Å
+          </dd>
+          <dt>f X-ray</dt>
+          <dd>{fmt(scat.fx)} e</dd>
+          <dt>f electron</dt>
+          <dd>{fmt(scat.fe)} Å</dd>
+          <dt>b neutron</dt>
+          <dd>{fmt(scat.bn)} fm</dd>
+        </dl>
+      {/if}
+    </article>
   </div>
-  <p class="hint">
-    s = {fmt(s)} Å⁻¹, d = {fmt(1 / (2 * s), 3)} Å{#if angleMode === 's'}, 2θ = {fmt(
-        twoThetaFromS(s, lambda),
-        3,
-      )}° with {(XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).label}{/if}.
-  </p>
-  {#if scat.error}
-    <p class="err">{scat.error}</p>
-  {:else if scat.info}
-    <dl data-testid="scattering">
-      <dt>{scat.info.name} (Z = {scat.info.Z})</dt>
-      <dd>
-        <span class="swatch" style:background={scat.info.color}></span> mass {scat.info.mass} u · covalent
-        {scat.info.covalentRadius} Å
-      </dd>
-      <dt>f X-ray</dt>
-      <dd>{fmt(scat.fx)} e</dd>
-      <dt>f electron</dt>
-      <dd>{fmt(scat.fe)} Å</dd>
-      <dt>b neutron</dt>
-      <dd>{fmt(scat.bn)} fm</dd>
-    </dl>
-  {/if}
 </section>
 
 <style>
-  section {
-    margin-top: 2.5rem;
+  .section-title {
+    margin: 0.5rem 0 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+  .card {
+    padding: 0.9rem 1.1rem;
+    min-width: 0;
+  }
+  .wide {
+    grid-column: 1 / -1;
+  }
+  article header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem 1rem;
+    margin-bottom: 0.6rem;
   }
   h3 {
-    margin: 1.5rem 0 0.5rem;
-    font-size: 0.95rem;
+    margin: 0;
+    font-size: 1rem;
     color: var(--text-h);
+  }
+  .muted {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--muted);
   }
   .hint {
     margin: 0 0 0.75rem;
+    font-size: 0.85rem;
   }
   .err {
     color: var(--err);
+  }
+  .empty {
+    margin: 0;
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--muted);
   }
   .row {
     display: flex;
@@ -389,17 +423,37 @@
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
+  .row span {
+    min-width: 7rem;
+  }
   .row input[type='number'] {
     width: 4.5rem;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+  .detected {
+    font-size: 0.88rem;
+  }
+  .scroll {
+    overflow-x: auto;
   }
   table {
     border-collapse: collapse;
     font-family: var(--mono);
     font-size: 0.85rem;
   }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+  }
   th,
   td {
-    padding: 0.15rem 0.7rem 0.15rem 0;
+    padding: 0.2rem 0.9rem 0.2rem 0;
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
@@ -421,7 +475,17 @@
     border: 1px solid var(--border);
     vertical-align: middle;
   }
-  details {
-    margin-bottom: 1rem;
+  .warnings {
+    margin-bottom: 0.75rem;
+    color: var(--warn);
+  }
+  .fold {
+    margin: 0.5rem 0 0;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .fold summary {
+    color: var(--text-h);
+    margin-bottom: 0.4rem;
   }
 </style>

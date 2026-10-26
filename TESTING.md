@@ -1,6 +1,6 @@
 # Testing what has been built (M0 to M6)
 
-There is no real user interface yet. What exists is the numerical core (lattice maths, CIF parser and writer, symmetry, unit-cell expansion, scattering factors, density) plus a temporary page, the **Core inspector**, for trying it by hand. The 3D viewer (M5) sits above it.
+There is no real user interface yet. What exists is the numerical core (lattice maths, CIF parser and writer, symmetry, unit-cell expansion, scattering factors, density) plus the page that shows them. From top to bottom it has a header (title, and a status pill at the top right that opens the pipeline check), the **Open CIF** bar, the **Structure viewer**, and the **Crystal data** cards.
 
 ## 0. One-time setup (Git Bash)
 
@@ -19,7 +19,7 @@ Every later command is run from `app/` with that `PATH` line active.
 npm run format:check && npm run lint && npm run check   # style, lint, type-check: all should print no errors
 npm test                                                # unit tests
 npm run test:rust                                       # Rust kernel tests (2)
-npm run test:e2e                                        # real Chromium: Core inspector, 3D viewer and panel (25 tests)
+npm run test:e2e                                        # real Chromium: page layout, 3D viewer, panel and orientation (40 tests)
 npm run build                                           # production build
 ```
 
@@ -39,13 +39,13 @@ CRYSTALLENS_EXTRA_CIFS="C:/Users/cha_lab/Documents/git/simulation/cifs" npm run 
 
 Last results: 599/600 files parse (the one failure has no atoms), all 599 build a unit cell, and 590 of 595 match pymatgen on site count, element counts and space-group number.
 
-## 2. Trying it by hand: the Core inspector
+## 2. Trying it by hand: opening a file and the Crystal data cards
 
 ```bash
 npm run dev            # open http://localhost:5173
 ```
 
-Click **Choose file** and load a CIF. Good ones to start with are in `app/tests/fixtures/cifs/`, then your own files. For each, check these against what you know:
+Click **Open CIF…** at the top, or drop a `.cif` file on that bar. The file name, formula, space group and crystal system appear beside it, and the **Crystal data** cards under the viewer fill in. Good ones to start with are in `app/tests/fixtures/cifs/`, then your own files. For each, check these against what you know:
 
 | File | What the page should show |
 |---|---|
@@ -64,11 +64,12 @@ Things to try on any file:
 - **Lattice vectors** (under the summary): the equations that turn a, b, c, α, β, γ into Cartesian vectors for this crystal's family, the resulting numbers, and a link to the AFLOW page for the family. The convention is a along x and b in the xy-plane. Trigonal crystals show hexagonal or rhombohedral axes depending on the setting. Monoclinic ones show unique axis a, b or c, depending on which angle is not 90°. A unit test checks that each set of equations reproduces the matrix the program uses for every fixture.
 - **Radiation** above the d-spacing table: Cu Kα₁ (1.5406 Å) by default, with Mo, Co, Fe, Cr and Ag Kα₁. The table has a 2θ column for it.
 - **Scattering factors**: type `Fe3+`, `O2-`, `D` or `Au`. The angle is entered as 2θ with Cu Kα₁ by default, or switch to s = sinθ/λ. The line under the inputs shows the resulting s and d. Expected for `C` at s = 0.5 (switch to s): X-ray 1.683 e, electron 0.413 Å. For `D`, the neutron length is 6.671 fm.
-- A file with several `data_` blocks shows a block chooser. A broken file shows an error message instead of a blank page.
+- **Asymmetric unit** and **Lattice vectors** each fold away when you click their title.
+- A file with several `data_` blocks shows a block chooser in the Open CIF bar. A broken file shows an error message instead of a blank page.
 
 ## 2a. The 3D viewer
 
-The **Structure viewer** at the top of the page shows whatever CIF is loaded in the Core inspector below it.
+The **Structure viewer** shows the CIF opened in the bar above it. Its toolbar has four labelled groups: **Display** (style, projection, Cell/Axes/Bonds/Toon), **View direction** (section 2c), **Rotate** (section 2c) and **Tools** (Measure, the three resets). The stage fills the height of the window.
 
 - **Mouse:** drag to rotate (free trackball, no gimbal lock), wheel to zoom, right-drag to pan.
 - **Style:** ball and stick, space filling (van der Waals radii, no bonds) and stick. Colours are Jmol. **Projection:** orthographic or perspective; the view keeps its size when you switch. **Cell**, **Axes** and **Toon** toggle the cell outline, the a/b/c triad in the corner and flat shading.
@@ -87,9 +88,9 @@ Things to look at, and to tell me about if wrong:
 4. **Your own CIFs**, especially the big supercells (`LaTe3_axial`, `ErTe3_rotation_supercell`) and the partial-occupancy files. **Partial occupancy is not drawn differently yet** (not in M6 either): a half-occupied site looks like a full atom, and mixed sites overlap.
 5. **Frame rate on a laptop or integrated GPU.** I measured about 90 fps at 118,000 atoms on the RTX A4000 in this PC, but I have not measured an integrated GPU. Please try the 24 × 24 × 24 NaCl on one and tell me the number in the bottom-right corner *while rotating*. Before 2026-10-26 that number counted animation ticks, not drawn frames, so it always said 60.
 
-## 2b. The viewer panel (range, bonds, polyhedra, appearance, visibility)
+## 2b. The viewer panel (range, bonds, polyhedra, appearance, elements)
 
-To the right of the view. Each section opens and closes.
+To the right of the view, as five tabs: **Range**, **Bonds**, **Polyhedra**, **Appearance** and **Elements** (arrow keys move between tabs too). Drag the grip on its left edge to make it wider or narrower (double-click the grip for the default width), or click **⟩** to fold it into a thin *Settings* strip and give the view the whole width. The width and the folded state are remembered in this browser. On a narrow window the panel moves under the view.
 
 **Range**
 - Buttons: **1 cell** (the 8 atoms inside, no boundary duplicates), **1 cell + boundary** (the default; 27 atoms for NaCl) and **2×2×2** (125 for NaCl). Or type any *from* and *to* per axis (negative and fractional values work). **Include boundary atoms** switches the upper bound between inclusive and exclusive.
@@ -105,7 +106,7 @@ To the right of the view. Each section opens and closes.
 
 **Appearance**: radii (automatic = covalent for ball-and-stick and van der Waals for space filling; covalent; ionic from oxidation states in the CIF's type symbols such as `Fe3+`, falling back to covalent; van der Waals; uniform), a scale slider, the background colour and atom labels (element or site label, up to 4,000 atoms).
 
-**Elements, sites and visibility**: per element and per site, a show checkbox, a colour and a radius in Å (empty means automatic). **↺** forgets the element's and its sites' overrides. **Hide N selected** hides the atoms you clicked (individual atoms, not the site), **Show N hidden** brings them back. Hiding an element or site also hides the bonds to it.
+**Elements**: per element and per site, a show checkbox, a colour and a radius in Å (empty means automatic). **↺** forgets the element's and its sites' overrides. **Hide N selected** hides the atoms you clicked (individual atoms, not the site), **Show N hidden** brings them back. Hiding an element or site also hides the bonds to it.
 
 Things to check:
 1. NaCl: the three range buttons give 8, 27 and 125 atoms; Reset range returns to 27.
@@ -116,7 +117,7 @@ Things to check:
 
 ## 2c. Orientation (M7)
 
-With a structure loaded, the row under the toolbar controls the view direction.
+The **View direction** and **Rotate** groups of the toolbar control the orientation; the live readout sits at the top left of the view.
 
 1. Type `1 1 0` in **View along [ ]** and press Go. The readout reads `Looking along [1 1 0] (0.00° off)`.
 2. Load graphite. **View along [1 0 0]**, then **View normal to (1 0 0)**: the picture turns by 30°. **View normal to (2 -1 0)** gives the [1 0 0] view again; [1 1 0] and the (1 1 0) normal are the same view.

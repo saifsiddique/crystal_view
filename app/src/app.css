@@ -1,30 +1,121 @@
 :root {
-  --text: #5b5566;
-  --text-h: #08060d;
-  --bg: #ffffff;
-  --border: #e5e4e7;
+  --text: #4f5566;
+  --text-h: #0d1220;
+  --muted: #7a8194;
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-2: #f0f3f8;
+  --border: #dfe3eb;
+  --border-strong: #c5ccd9;
+  --accent: #5b5bd6;
+  --accent-2: #0ea5a4;
+  --accent-soft: #e9e9fb;
+  --accent-ink: #3c3cb0;
   --ok: #0f7b4f;
   --err: #b42318;
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --warn: #8a5a00;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 2px 8px rgba(16, 24, 40, 0.05);
+  --radius: 10px;
+  --sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
-  font: 16px/1.5 var(--sans);
-  color-scheme: light dark;
+  font: 15px/1.5 var(--sans);
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
+    --text: #a7adbb;
+    --text-h: #eef0f5;
+    --muted: #7d8394;
+    --bg: #0f1117;
+    --surface: #171a22;
+    --surface-2: #1e222c;
+    --border: #2a2f3b;
+    --border-strong: #3a4050;
+    --accent: #8b8bf5;
+    --accent-2: #2dd4bf;
+    --accent-soft: #262946;
+    --accent-ink: #c4c4ff;
     --ok: #6ee7b7;
     --err: #fca5a5;
+    --warn: #fbbf24;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.25);
+    color-scheme: dark;
   }
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+}
+
+/* ---- shared controls ---------------------------------------------------------------------- */
+
+button,
+input,
+select {
+  font: inherit;
+  color: var(--text-h);
+}
+
+button {
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  line-height: 1.35;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button[aria-pressed='true'],
+button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+input[type='text'],
+input[type='number'],
+input:not([type]),
+select {
+  padding: 0.18rem 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  min-width: 0;
+}
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+input[type='checkbox'],
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+/* A card: the white panels the page is built from. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+details > summary {
+  cursor: pointer;
 }
