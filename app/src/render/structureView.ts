@@ -182,8 +182,27 @@ export class StructureView {
 
   // ---- public API ------------------------------------------------------------------------------
 
-  /** Replace the structure. Rebuilds every instance buffer and resets the camera. */
-  setStructure(model: StructureModel, lattice: Lattice): void {
+  /**
+   * Replace the structure. Rebuilds every instance buffer. The camera is reset to the default
+   * view, unless `keepView` is set (same crystal, different range): then the orientation, pan and
+   * magnification stay where the user left them.
+   */
+  setStructure(model: StructureModel, lattice: Lattice, keepView = false): void {
+    let saved: {
+      position: Vector3;
+      target: Vector3;
+      up: Vector3;
+      worldPerPixel: number;
+    } | null = null;
+    if (keepView && this.model) {
+      const o = this.origin;
+      saved = {
+        position: this.camera.position.clone().add(new Vector3(o[0], o[1], o[2])),
+        target: this.controls.target.clone().add(new Vector3(o[0], o[1], o[2])),
+        up: this.camera.up.clone(),
+        worldPerPixel: this.viewHeight() / this.ortho.zoom,
+      };
+    }
     this.clearStructure();
     this.model = model;
     this.lattice = lattice;
@@ -241,7 +260,8 @@ export class StructureView {
     this.buildCellLines();
     this.buildTriad();
     this.applyStyle(this.style);
-    this.fitCamera();
+    if (saved) this.restoreView(saved);
+    else this.fitCamera();
     this.requestRender();
   }
 
@@ -393,6 +413,19 @@ export class StructureView {
     this.requestRender();
   }
 
+  /** Line of sight, screen-up direction and the height in angstrom visible at the target. */
+  viewState(): { direction: Vec3; up: Vec3; visibleHeight: number } {
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    return {
+      direction: this.viewDirection(),
+      up: [this.camera.up.x, this.camera.up.y, this.camera.up.z],
+      visibleHeight:
+        this.camera === this.ortho
+          ? this.viewHeight() / this.ortho.zoom
+          : 2 * dist * Math.tan((FOV * Math.PI) / 360),
+    };
+  }
+
   /** Cartesian direction of the line of sight (from the camera into the scene). */
   viewDirection(): Vec3 {
     this.v1.copy(this.controls.target).sub(this.camera.position).normalize();
@@ -457,9 +490,10 @@ export class StructureView {
     this.requestRender();
   }
 
-  requestRender(): void {
+  /** An arrow function, because it is also the controls' 'change' listener. */
+  readonly requestRender = (): void => {
     this.needsRender = true;
-  }
+  };
 
   dispose(): void {
     this.disposed = true;
@@ -721,15 +755,43 @@ export class StructureView {
     return this.radius * 2.5;
   }
 
-  private fitCamera(): void {
-    const model = this.model!;
-    const { min, max } = model.bounds;
+  /** Size of the structure: sets `radius` (bounding sphere) and the default camera distance. */
+  private measureExtent(): void {
+    const { min, max } = this.model!.bounds;
     const maxAtom = Math.max(0, ...this.baseRadius.slice(0, Math.min(this.baseRadius.length, 64)));
     this.radius = Math.max(
       0.5,
       Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2 + maxAtom,
     );
     this.distance = this.viewHeight() / 2 / Math.tan((FOV * Math.PI) / 360);
+  }
+
+  /** Put the camera back where it was in absolute (Cartesian) coordinates after a rebuild. */
+  private restoreView(saved: {
+    position: Vector3;
+    target: Vector3;
+    up: Vector3;
+    worldPerPixel: number;
+  }): void {
+    this.measureExtent();
+    const o = new Vector3(this.origin[0], this.origin[1], this.origin[2]);
+    this.controls.target.copy(saved.target).sub(o);
+    this.camera.up.copy(saved.up);
+    if (this.camera === this.ortho) {
+      // An orthographic image does not depend on the camera distance; keep the direction, put the
+      // camera outside the new structure, and keep the angstrom-per-pixel scale.
+      const dir = saved.position.clone().sub(saved.target).normalize();
+      this.camera.position.copy(this.controls.target).addScaledVector(dir, this.distance);
+      this.ortho.zoom = this.viewHeight() / saved.worldPerPixel;
+    } else {
+      this.camera.position.copy(saved.position).sub(o);
+    }
+    this.updateProjection();
+    this.controls.update();
+  }
+
+  private fitCamera(): void {
+    this.measureExtent();
     this.controls.target.set(0, 0, 0);
     this.ortho.zoom = 1;
     this.camera.up.set(0, 1, 0);
@@ -743,7 +805,9 @@ export class StructureView {
   private updateProjection(): void {
     const aspect = this.width / this.height;
     const h = this.viewHeight();
-    const far = this.distance + this.radius * 12;
+    // Generous: a perspective camera may be zoomed (dollied) far out.
+    const far = this.distance * 40 + this.radius * 12;
+    this.controls.maxDistance = this.distance * 30;
     this.ortho.left = (-aspect * h) / 2;
     this.ortho.right = (aspect * h) / 2;
     this.ortho.top = h / 2;
@@ -824,10 +888,12 @@ export class StructureView {
       this.needsRender = false;
       this.draw();
       this.stats.renders++;
+      this.fpsFrames++;
       this.callbacks.onRender?.();
     }
+    // `fps` counts frames actually drawn (0 while idle), not animation-loop ticks, so it shows
+    // what the GPU delivers while rotating.
     this.stats.frames++;
-    this.fpsFrames++;
     if (now - this.fpsStart >= 1000) {
       this.stats.fps = (this.fpsFrames * 1000) / (now - this.fpsStart);
       this.fpsStart = now;

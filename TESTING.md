@@ -19,11 +19,11 @@ Every later command is run from `app/` with that `PATH` line active.
 npm run format:check && npm run lint && npm run check   # style, lint, type-check: all should print no errors
 npm test                                                # unit tests
 npm run test:rust                                       # Rust kernel tests (2)
-npm run test:e2e                                        # real Chromium: Core inspector and 3D viewer (6 tests)
+npm run test:e2e                                        # real Chromium: Core inspector and 3D viewer (8 tests)
 npm run build                                           # production build
 ```
 
-Expected: about 309 unit tests pass (about 286 without the local COD sample and your own CIF folder). One timing assertion (parsing a 20,000-atom CIF in under a second) failed once under load and did not recur in four reruns; rerun `npm test` if it is the only failure. GitHub runs the same chain on every push (Actions tab of `crystal_view`).
+Expected: about 318 unit tests pass (about 295 without the local COD sample and your own CIF folder). One timing assertion (parsing a 20,000-atom CIF in under a second) failed once under load and did not recur in four reruns; rerun `npm test` if it is the only failure. GitHub runs the same chain on every push (Actions tab of `crystal_view`).
 
 Extra checks against real-world files (these skip themselves when the files are absent):
 
@@ -49,7 +49,7 @@ Click **Choose file** and load a CIF. Good ones to start with are in `app/tests/
 
 | File | What the page should show |
 |---|---|
-| `Si.cif` | Fd-3m (227), 192 operations, Z = 8, 8 atoms in 8 positions, density 2.33 g/cm³. In the d-spacing table, (111) is 3.1354 Å and strong, while (100), (110) and (200) say "0 (absent)". |
+| `Si.cif` | *Fd*3̄*m* (No. 227), 192 operations, Z = 8, 8 atoms in 8 positions, density 2.33 g/cm³. Lattice vectors: cubic. In the d-spacing table, (111) is 3.1354 Å at 2θ = 28.44° (Cu Kα₁) and strong, while (100), (110) and (200) say "0 (absent)". |
 | `NaCl.cif` | Fm-3m (225), formula `Cl Na`, Z = 4, 8 atoms, density 2.165 g/cm³. |
 | `graphite.cif` | P6₃/mmc (194), hexagonal, 4 atoms. In the lattice calculator, [100] against (100) gives **30°**, while [110] against (110) gives **0°** (in a hexagonal cell [110] is the normal of (110), but [100] is not the normal of (100)). |
 | `ZrO2_baddeleyite.cif` | monoclinic P2₁/c (14), 12 atoms. [100] against (100): **9.23°** (that is β − 90°). |
@@ -60,7 +60,10 @@ Things to try on any file:
 - **Detect symmetry from positions** compares the symmetry found from the atom positions with the CIF's declared group. A mismatch is a warning about your file, not necessarily a bug.
 - **Download P1 cell**, then load the downloaded file again. It should give the same formula and atom count, with space group 1, and **Detect symmetry** should recover the original group.
 - **Lattice calculator**: enter a direction [uvw] and a plane (hkl). It shows the direction's length, d(hkl), the angle between the direction and the plane normal, and the plane whose normal is closest to the direction.
-- **Scattering factors**: type `Fe3+`, `O2-`, `D` or `Au` with an s value (s = sinθ/λ = 1/2d). Expected for `C` at s = 0.5: X-ray 1.683 e, electron 0.413 Å. For `D`, the neutron length is 6.671 fm.
+- **Space group** is typeset: italic letters, screw axes with subscripts (*P*6₃/*mmc*), rotoinversions with a bar (*Fm*3̄*m*). The **Declared** line under it is the CIF's text as written.
+- **Lattice vectors** (under the summary): the equations that turn a, b, c, α, β, γ into Cartesian vectors for this crystal's family, the resulting numbers, and a link to the AFLOW page for the family. The convention is a along x and b in the xy-plane. Trigonal crystals show hexagonal or rhombohedral axes depending on the setting. Monoclinic ones show unique axis a, b or c, depending on which angle is not 90°. A unit test checks that each set of equations reproduces the matrix the program uses for every fixture.
+- **Radiation** above the d-spacing table: Cu Kα₁ (1.5406 Å) by default, with Mo, Co, Fe, Cr and Ag Kα₁. The table has a 2θ column for it.
+- **Scattering factors**: type `Fe3+`, `O2-`, `D` or `Au`. The angle is entered as 2θ with Cu Kα₁ by default, or switch to s = sinθ/λ. The line under the inputs shows the resulting s and d. Expected for `C` at s = 0.5 (switch to s): X-ray 1.683 e, electron 0.413 Å. For `D`, the neutron length is 6.671 fm.
 - A file with several `data_` blocks shows a block chooser. A broken file shows an error message instead of a blank page.
 
 ## 2a. The 3D viewer
@@ -69,7 +72,7 @@ The **Structure viewer** at the top of the page shows whatever CIF is loaded in 
 
 - **Mouse:** drag to rotate (free trackball, no gimbal lock), wheel to zoom, right-drag to pan.
 - **Style:** ball and stick, space filling (van der Waals radii, no bonds) and stick. Colours are Jmol. **Projection:** orthographic or perspective; the view keeps its size when you switch. **Cell**, **Axes** and **Toon** toggle the cell outline, the a/b/c triad in the corner and flat shading.
-- **Cells a/b/c:** repeats the cell (1 to 30 per axis). 24 × 24 × 24 cells of `NaCl.cif` is about 118,000 atoms and 346,000 bonds, which is the stress test; the readout at the bottom right shows the atom and bond counts and the frame rate.
+- **Cells a/b/c:** repeats the cell (1 to 30 per axis). Your orientation, pan and zoom are kept when you change it; loading a different crystal resets the view. 24 × 24 × 24 cells of `NaCl.cif` is about 118,000 atoms and 346,000 bonds, which is the stress test; the readout at the bottom right shows the atom and bond counts and the number of frames actually drawn per second. It reads **idle** when nothing is moving, because nothing is redrawn then.
 - **View along a / b / c:** looks down that lattice vector. In graphite, **c** shows the honeycomb layer.
 - **Hover** an atom for its label, element, fractional coordinates (including the lattice translation) and occupancy. The atom picked is the one you see in front, also where atoms overlap.
 - **Click** selects an atom (it turns gold); click it again, or empty space, to deselect. **Measure** limits the selection to 4 and shows labels: two atoms give a distance, three give the angle at the middle atom, four give the torsion. In `NaCl.cif` an Na–Cl bond should read 2.810 Å, and two neighbouring Na atoms 3.974 Å.
@@ -80,7 +83,7 @@ Things to look at, and to tell me about if wrong:
 2. **Bonds.** NaCl: Na–Cl only, 54 bonds in the closed cell. Graphite: the honeycomb, with no bonds between layers. Silicon: tetrahedral. Rutile: each Ti with six O.
 3. **Hexagonal and monoclinic cells.** `graphite.cif` and `ZrO2_baddeleyite.cif` should look like their real cells (angles of 120° and about 99°), not like a cube.
 4. **Your own CIFs**, especially the big supercells (`LaTe3_axial`, `ErTe3_rotation_supercell`) and the partial-occupancy files. **Partial occupancy is not drawn differently yet**: a half-occupied site looks like a full atom, and mixed sites overlap. That comes with M6.
-5. **Frame rate on a laptop or integrated GPU.** I measured about 90 fps at 118,000 atoms on the RTX A4000 in this PC, but I have not measured an integrated GPU. Please try the 24 × 24 × 24 NaCl on one and tell me the number in the bottom-right corner while rotating.
+5. **Frame rate on a laptop or integrated GPU.** I measured about 90 fps at 118,000 atoms on the RTX A4000 in this PC, but I have not measured an integrated GPU. Please try the 24 × 24 × 24 NaCl on one and tell me the number in the bottom-right corner *while rotating*. Before 2026-10-26 that number counted animation ticks, not drawn frames, so it always said 60.
 
 ## 3. Your own CIFs
 

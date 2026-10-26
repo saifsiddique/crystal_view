@@ -45,8 +45,10 @@
       <dd data-testid="kernel-status" data-state={kernel.state}>
         {kernel.state === 'ok' ? `kernel ${kernel.detail}` : kernel.detail}
       </dd>
-      <dt>Worker pool size</dt>
-      <dd>{cores === null ? '…' : Math.max(1, cores - 1)}</dd>
+      <!-- One compute worker exists so far; the heavy modules (M10, M11) add a pool sized from
+           the CPU thread count. -->
+      <dt>CPU threads</dt>
+      <dd>{cores === null ? '…' : `${cores} (compute workers running: 1)`}</dd>
     </dl>
   </section>
 

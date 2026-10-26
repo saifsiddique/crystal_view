@@ -15,6 +15,15 @@
   import type { Vec3 } from './core/math/vec3';
   import { bn, elementInfo, fe, fx, parseSpecies, sFromD } from './core/scattering';
   import { detectSpaceGroup, type DetectedSymmetry } from './symmetry/detect';
+  import {
+    DEFAULT_XRAY_LINE,
+    XRAY_LINES,
+    sFromTwoTheta,
+    twoThetaFromD,
+    twoThetaFromS,
+  } from './core/radiation';
+  import LatticeVectors from './ui/LatticeVectors.svelte';
+  import SpaceGroupSymbol from './ui/SpaceGroupSymbol.svelte';
 
   let { onCrystal }: { onCrystal?: (crystal: Crystal | null) => void } = $props();
 
@@ -125,9 +134,16 @@
       .slice(0, 12);
   });
 
+  // ---- radiation (Cu Kalpha1 unless changed) --------------------------------------------------
+  let lineId = $state(DEFAULT_XRAY_LINE.id);
+  const lambda = $derived((XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).lambda);
+
   // ---- scattering lookup ------------------------------------------------------------------------
   let speciesText = $state('Fe3+');
-  let s = $state(0.3);
+  let angleMode = $state<'twoTheta' | 's'>('twoTheta');
+  let twoTheta = $state(40);
+  let sInput = $state(0.3);
+  const s = $derived(angleMode === 's' ? sInput : sFromTwoTheta(twoTheta, lambda));
   const scat = $derived.by(() => {
     try {
       const sp = parseSpecies(speciesText);
@@ -175,8 +191,8 @@
       <dd>{fmt(c.summary.volume, 3)} Å³</dd>
       <dt>Space group</dt>
       <dd data-testid="space-group">
-        {c.spaceGroup.number ?? '?'}
-        {c.spaceGroup.symbol ?? ''} ({c.spaceGroup.crystalSystem ?? 'unknown'}),
+        {#if c.spaceGroup.symbol}<SpaceGroupSymbol symbol={c.spaceGroup.symbol} />{/if}
+        (No. {c.spaceGroup.number ?? '?'}, {c.spaceGroup.crystalSystem ?? 'unknown'}),
         {c.spaceGroup.order} operations, from {c.spaceGroup.source}
       </dd>
       <dt>Declared</dt>
@@ -190,6 +206,8 @@
       <dd>{fmt(density(c), 3)} g/cm³</dd>
     </dl>
 
+    <LatticeVectors crystal={c} />
+
     <p>
       <button onclick={detect} disabled={detecting} data-testid="detect">
         {detecting ? 'Detecting…' : 'Detect symmetry from positions'}
@@ -199,8 +217,8 @@
       </button>
       {#if detected}
         <span data-testid="detected">
-          detected {detected.number}
-          {detected.hmSymbol} ({detected.pearsonSymbol})
+          detected <SpaceGroupSymbol symbol={detected.hmSymbol} /> (No. {detected.number},
+          {detected.pearsonSymbol})
           {detected.number === c.spaceGroup.number
             ? '✓ matches the CIF'
             : '≠ the CIF declares ' + c.spaceGroup.number}
@@ -270,8 +288,20 @@
     {/if}
 
     <h3>Largest d-spacings</h3>
+    <div class="row">
+      <span>radiation</span>
+      <select bind:value={lineId} aria-label="radiation" data-testid="radiation">
+        {#each XRAY_LINES as l (l.id)}<option value={l.id}
+            >{l.label} ({l.lambda.toFixed(4)} Å)</option
+          >{/each}
+      </select>
+    </div>
     <table>
-      <thead><tr><th>(hkl)</th><th>d (Å)</th><th>s = 1/2d</th><th>F² X-ray (rel.)</th></tr></thead>
+      <thead
+        ><tr
+          ><th>(hkl)</th><th>d (Å)</th><th>2θ (°)</th><th>s = 1/2d</th><th>F² X-ray (rel.)</th></tr
+        ></thead
+      >
       <tbody>
         {#each planes as p (p.d)}
           {@const F2 = (() => {
@@ -287,9 +317,9 @@
             return re * re + im * im;
           })()}
           <tr
-            ><td>{p.hkl.join(' ')}</td><td>{fmt(p.d)}</td><td>{fmt(sFromD(p.d))}</td><td
-              >{F2 < 1e-6 ? '0 (absent)' : fmt(F2, 1)}</td
-            ></tr
+            ><td>{p.hkl.join(' ')}</td><td>{fmt(p.d)}</td><td
+              >{fmt(twoThetaFromD(p.d, lambda), 3)}</td
+            ><td>{fmt(sFromD(p.d))}</td><td>{F2 < 1e-6 ? '0 (absent)' : fmt(F2, 1)}</td></tr
           >
         {/each}
       </tbody>
@@ -299,14 +329,25 @@
   <h3>Scattering factors</h3>
   <div class="row">
     <span>species</span><input type="text" bind:value={speciesText} aria-label="species" size="6" />
-    <span>s = sinθ/λ (Å⁻¹)</span><input
-      type="number"
-      step="0.05"
-      min="0"
-      bind:value={s}
-      aria-label="s"
-    />
+    <select bind:value={angleMode} aria-label="angle input">
+      <option value="twoTheta">2θ (°)</option>
+      <option value="s">s = sinθ/λ (Å⁻¹)</option>
+    </select>
+    {#if angleMode === 'twoTheta'}
+      <input type="number" step="1" min="0" max="180" bind:value={twoTheta} aria-label="2θ" />
+      <select bind:value={lineId} aria-label="wavelength">
+        {#each XRAY_LINES as l (l.id)}<option value={l.id}>{l.label}</option>{/each}
+      </select>
+    {:else}
+      <input type="number" step="0.05" min="0" bind:value={sInput} aria-label="s" />
+    {/if}
   </div>
+  <p class="hint">
+    s = {fmt(s)} Å⁻¹, d = {fmt(1 / (2 * s), 3)} Å{#if angleMode === 's'}, 2θ = {fmt(
+        twoThetaFromS(s, lambda),
+        3,
+      )}° with {(XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).label}{/if}.
+  </p>
   {#if scat.error}
     <p class="err">{scat.error}</p>
   {:else if scat.info}

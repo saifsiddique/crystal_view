@@ -14,6 +14,8 @@
   let view: StructureView | null = null;
   let ready = $state(false);
   let lastCrystal: Crystal | null = null;
+  // True until a newly loaded crystal has been drawn once (with the default camera).
+  let fresh = true;
 
   let style = $state<DisplayStyle>('ballStick');
   let projection = $state<Projection>('ortho');
@@ -85,6 +87,7 @@
       model: () => model,
       pickAt: (x: number, y: number) => view!.pickAt(x, y),
       selection: () => [...view!.getSelection()],
+      viewState: () => view!.viewState(),
     };
     ready = true;
     return () => {
@@ -103,6 +106,7 @@
     // A newly loaded crystal starts at one cell; changing the counts then re-runs this effect.
     if (c !== lastCrystal) {
       lastCrystal = c;
+      fresh = true;
       if (n.some((x) => x !== 1)) {
         repeat = [1, 1, 1];
         return;
@@ -118,7 +122,9 @@
       // Only the crystal and the cell counts rebuild the scene; the other settings are applied
       // here without being tracked (their own effects below handle later changes).
       untrack(() => {
-        view!.setStructure(built, c.lattice);
+        // Same crystal, new cell counts: keep the user's orientation and zoom.
+        view!.setStructure(built, c.lattice, !fresh);
+        fresh = false;
         view!.setStyle(style);
         view!.setToon(toon);
         view!.setShowCell(showCell);
@@ -265,7 +271,7 @@
       {#if model}{model.count.toLocaleString('en')} atoms · {(
           model.bonds.length / 2
         ).toLocaleString('en')} bonds ·
-      {/if}{fps} fps
+      {/if}{fps > 0 ? `${fps} fps` : 'idle'}
     </div>
   </div>
   <p class="hint">
