@@ -24,7 +24,7 @@
 | M4 | Scattering-factor tables | M0 | ✅ done 2026-10-24 (see §7.M4) |
 | M5 | 3D structure renderer | M3 | ✅ done 2026-10-24 (see §7.M5) |
 | M6 | View range, bonds, styles & colours | M5 | ✅ done 2026-10-26 (see §7.M6) |
-| M7 | Orientation control (mouse ↔ [uvw]/(hkl)) | M5, M1 | ☐ |
+| M7 | Orientation control (mouse ↔ [uvw]/(hkl)) | M5, M1 | ✅ done 2026-10-26 (see §7.M7) |
 | M8 | Kinematic electron diffraction (indexed) | M3, M4, M7 | ☐ |
 | M9 | Powder XRD | M3, M4 | ☐ |
 | M10 | Kikuchi lines & HOLZ (geometric) | M8 | ☐ |
@@ -638,6 +638,19 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - In graphite (hexagonal), "view along [100]" and "view normal to (100)" give **different** views (30° apart), while "view along [110]" and "view normal to (110)" give the **same** view; "view along [100]" equals "view normal to (2 −1 0)" (v6 bug 4 regression; see M1 status). In monoclinic ZrO₂, [100] and the (100) normal differ by β − 90° = 9.23°.
 - The readout is stable (no flicker) at a zone axis.
 - Typing an index and reading it back round trips.
+
+**Added by the user for this module:** (1) the page fills the window width (the 78 rem cap on `main` is gone); (2) right-drag pan is faster; (3) snapping to the nearest zone axis is a button, off by default; (4) the arrow keys tilt the structure.
+
+**M7 status (done 2026-10-26).**
+- Core: `core/orientation.ts` (pure): `directionAlongUvw`, `directionNormalToHkl`, `defaultUp` (c, or b within 1 degree of c), `makeFrame`, `rotateView(frame, {right, upward, roll})`, `readOrientation(lat, dir, memory)` (nearest [uvw] and (hkl), index <= 6, sticky by `READOUT_HYSTERESIS` = 0.05 degrees so it does not flicker), `snapToZoneAxis(lat, dir, thresholdDeg, maxIndex)`. 18 unit tests, including the graphite and ZrO2 acceptance numbers.
+- Store: `ui/orientation.svelte.ts` holds `{ready, direction, up, uvw, hkl}`, updated on every drawn frame. M8/M10/M11 read it and debounce by 150 ms themselves.
+- UI (Viewer.svelte): typed View along [uvw] / View normal to (hkl) (real numbers allowed), quick buttons a b c / a* b* c*, tilt buttons plus a step input (default 5 degrees), rotate +-90 degrees, the live readout, and the Snap button with its angle (default 2 degrees) and largest index (default 3). The old "View along a/b/c" group moved into this row.
+- Keyboard: click the view to focus it; arrows tilt by the step, Shift = 1 degree, Ctrl = 15 degrees, Alt+Left/Right = roll. Snapping does not apply to the keys, or a 1 degree press could never leave a zone axis.
+- Snap: only after a mouse **rotation** ends (`onGestureEnd(rotated)` from the renderer), and only to axes with index <= `snapMaxIndex`. With index up to 6 and a wide angle there is always a high-index axis nearby, which is not what anyone means by a zone axis. `ViewSettings` gained `snapToZone`, `snapDegrees`, `snapMaxIndex`, `tiltStep` (parsed, defaulted, carried to a new crystal).
+- Pan: the trackball's pan factor was ~30x too small in orthographic mode (it multiplies by the eye distance and divides by the canvas width). `setPanSpeed` now makes the structure follow the pointer exactly in x (ortho), and within the aspect ratio in y for perspective.
+- Gotcha: TrackballControls applies a drag's last movement in `update()`, and fires `end` before that. `onGestureEnd` calls `controls.update()` first, otherwise a snap is overwritten by the pending movement.
+- Gotcha: `<output>` has the ARIA role `status`; it collided with the M6 warning test's `getByRole('status')`. The readout is a `<span>`.
+- Not done: four-index (Miller-Bravais) input for hexagonal cells; the 3-index form works.
 
 ---
 

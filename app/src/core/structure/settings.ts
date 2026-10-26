@@ -41,6 +41,13 @@ export interface ViewSettings {
   showAxes: boolean;
   toon: boolean;
   projection: 'ortho' | 'persp';
+  /** Snap to the nearest zone axis when a mouse rotation ends within `snapDegrees` of one. */
+  snapToZone: boolean;
+  snapDegrees: number;
+  /** Largest index of the zone axes that snapping aims at (3 keeps to the low-index ones). */
+  snapMaxIndex: number;
+  /** Angle of one arrow-key press or goniometer button, degrees. */
+  tiltStep: number;
 }
 
 export const defaultRange = (): RangeSettings => {
@@ -64,6 +71,10 @@ export function defaultViewSettings(crystal: Crystal | null): ViewSettings {
     showAxes: true,
     toon: false,
     projection: 'ortho',
+    snapToZone: false,
+    snapDegrees: 2,
+    snapMaxIndex: 3,
+    tiltStep: 5,
   };
 }
 
@@ -90,6 +101,10 @@ export function settingsForNewCrystal(previous: ViewSettings, crystal: Crystal):
   fresh.showAxes = previous.showAxes;
   fresh.toon = previous.toon;
   fresh.projection = previous.projection;
+  fresh.snapToZone = previous.snapToZone;
+  fresh.snapDegrees = previous.snapDegrees;
+  fresh.snapMaxIndex = previous.snapMaxIndex;
+  fresh.tiltStep = previous.tiltStep;
   fresh.bonds.beyondRange = previous.bonds.beyondRange;
   fresh.bonds.completeMolecules = previous.bonds.completeMolecules;
   return fresh;
@@ -217,5 +232,15 @@ export function parseViewSettings(json: unknown, crystal: Crystal | null): ViewS
   if (typeof j.showAxes === 'boolean') out.showAxes = j.showAxes;
   if (typeof j.toon === 'boolean') out.toon = j.toon;
   if (j.projection === 'ortho' || j.projection === 'persp') out.projection = j.projection;
+  if (typeof j.snapToZone === 'boolean') out.snapToZone = j.snapToZone;
+  if (isNum(j.snapDegrees) && j.snapDegrees > 0 && j.snapDegrees <= 45)
+    out.snapDegrees = j.snapDegrees;
+  if (
+    Number.isInteger(j.snapMaxIndex) &&
+    (j.snapMaxIndex as number) >= 1 &&
+    (j.snapMaxIndex as number) <= 6
+  )
+    out.snapMaxIndex = j.snapMaxIndex as number;
+  if (isNum(j.tiltStep) && j.tiltStep > 0 && j.tiltStep <= 90) out.tiltStep = j.tiltStep;
   return out;
 }

@@ -114,6 +114,18 @@ Things to check:
 4. A colour change (click the swatch beside an element, move around in the picker) should follow at once. On the 118,000-atom structure it takes about 20 ms per change, so it should still feel immediate.
 5. Your own structures: read the bond rules the table starts with. If an expected bond is missing or an unexpected one is drawn, the rule limits are the thing to change, and I want to know which pair and what distance in the CIF.
 
+## 2c. Orientation (M7)
+
+With a structure loaded, the row under the toolbar controls the view direction.
+
+1. Type `1 1 0` in **View along [ ]** and press Go. The readout reads `Looking along [1 1 0] (0.00° off)`.
+2. Load graphite. **View along [1 0 0]**, then **View normal to (1 0 0)**: the picture turns by 30°. **View normal to (2 -1 0)** gives the [1 0 0] view again; [1 1 0] and the (1 1 0) normal are the same view.
+3. Drag with the mouse and watch the readout follow. It should not flicker between two axes when you stop near the middle of them.
+4. Click the viewer (a blue outline appears) and press the arrow keys: each press tilts by the step (5° by default). Shift gives 1°, Ctrl gives 15°, Alt+Left/Right rolls. The ◀ ▶ ▲ ▼ buttons do the same; ⟲ 90° and ⟳ 90° turn the picture about the line of sight.
+5. Press **Snap to zone axis** (it says on/off). Rotate with the mouse and let go within 2° of a low-index axis (index up to 3): the view jumps onto it exactly. It never acts while the button is off, and not on the arrow keys.
+6. Right-drag: the structure should follow the pointer.
+7. The page now uses the whole window width.
+
 ## 3. Your own CIFs
 
 Load each file in `simulation/cifs`. This is what the code currently reports for them; check it against the source (ICSD entry, VESTA, CrystalMaker) and tell me wherever it is wrong:

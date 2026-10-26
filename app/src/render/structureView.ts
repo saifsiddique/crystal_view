@@ -63,6 +63,8 @@ export interface ViewCallbacks {
   onSelect?: (selection: readonly number[]) => void;
   /** Called after each rendered frame, for overlays that follow the structure. */
   onRender?: () => void;
+  /** A mouse drag or wheel gesture ended; `rotated` says whether the line of sight changed. */
+  onGestureEnd?: (rotated: boolean) => void;
 }
 
 export interface ViewStats {
@@ -117,6 +119,7 @@ export class StructureView {
   private readonly measureLines: LineSegments;
   private selection: number[] = [];
   private selectionLimit = 0;
+  private gestureDir: Vec3 = [0, 0, -1];
 
   private sphereCache: SphereGeometry | null = null;
   private cylinderCache: CylinderGeometry | null = null;
@@ -621,15 +624,33 @@ export class StructureView {
     const controls = new TrackballControls(this.camera, this.canvas);
     controls.rotateSpeed = 3;
     controls.zoomSpeed = 1.2;
-    controls.panSpeed = 0.8;
+    controls.panSpeed = 1;
     // No inertia: the crystal stops where the pointer is released, so it can be placed precisely.
     controls.staticMoving = true;
     // Its default A/S/D shortcuts would fire while typing in the page's text fields.
     controls.keys = ['', '', ''];
     if (keep) controls.target.copy(keep);
     controls.addEventListener('change', this.requestRender);
+    controls.addEventListener('start', this.onGestureStart);
+    controls.addEventListener('end', this.onGestureEnd);
     return controls;
   }
+
+  private readonly onGestureStart = (): void => {
+    this.gestureDir = this.viewDirection();
+  };
+
+  private readonly onGestureEnd = (): void => {
+    // The controls apply a drag's last movement in update(); do it now, so the direction is final
+    // and nothing is left pending to undo a snap.
+    this.controls.update();
+    const d = this.viewDirection();
+    const rotated =
+      Math.hypot(d[0] - this.gestureDir[0], d[1] - this.gestureDir[1], d[2] - this.gestureDir[2]) >
+      1e-6;
+    this.gestureDir = d;
+    this.callbacks.onGestureEnd?.(rotated);
+  };
 
   private clearStructure(): void {
     for (const m of this.atomMeshes) {
@@ -956,6 +977,21 @@ export class StructureView {
     this.persp.near = 0.05;
     this.persp.far = far;
     this.persp.updateProjectionMatrix();
+    this.setPanSpeed();
+  }
+
+  /**
+   * The trackball's pan factor depends on the camera, so that a drag moves the structure by the
+   * distance the pointer moved: the visible width over the canvas width, scaled by the eye distance
+   * the controls multiply in.
+   */
+  private setPanSpeed(): void {
+    if (this.camera === this.ortho) {
+      this.controls.panSpeed =
+        this.width / Math.max(1e-6, this.camera.position.distanceTo(this.controls.target));
+    } else {
+      this.controls.panSpeed = 2 * Math.tan((FOV * Math.PI) / 360) * (this.width / this.height);
+    }
   }
 
   // ---- pointer ---------------------------------------------------------------------------------

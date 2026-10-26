@@ -21,7 +21,17 @@
     type StructureModel,
     type ViewSettings,
   } from '../core/structure';
+  import {
+    defaultUp,
+    directionAlongUvw,
+    directionNormalToHkl,
+    readOrientation,
+    rotateView,
+    snapToZoneAxis,
+    type ReadoutMemory,
+  } from '../core/orientation';
   import { StructureView } from '../render/structureView';
+  import { orientation } from './orientation.svelte';
   import ViewPanel from './ViewPanel.svelte';
 
   let { crystal }: { crystal: Crystal | null } = $props();
@@ -123,6 +133,107 @@
   function onRendered() {
     updateMeasurementLabels();
     drawAtomLabels();
+    updateOrientation();
+  }
+
+  // ---- orientation (M7) ---------------------------------------------------------------------------
+
+  const memory: ReadoutMemory = {};
+  let readLattice: unknown = null;
+  let readDirection: Vec3 = [0, 0, 0];
+
+  /** Refresh the live [uvw]/(hkl) readout, only when the line of sight or the lattice changed. */
+  function updateOrientation() {
+    if (!view || !crystal) {
+      orientation.ready = false;
+      return;
+    }
+    const { direction, up } = view.viewState();
+    const lat = crystal.lattice;
+    const moved =
+      Math.abs(direction[0] - readDirection[0]) +
+        Math.abs(direction[1] - readDirection[1]) +
+        Math.abs(direction[2] - readDirection[2]) >
+      1e-9;
+    if (lat === readLattice && !moved) {
+      orientation.up = up;
+      return;
+    }
+    if (lat !== readLattice) {
+      delete memory.uvw;
+      delete memory.hkl;
+      readLattice = lat;
+    }
+    readDirection = direction;
+    const r = readOrientation(lat, direction, memory);
+    orientation.ready = true;
+    orientation.direction = direction;
+    orientation.up = up;
+    orientation.uvw = r.uvw;
+    orientation.hkl = r.hkl;
+  }
+
+  let uvwInput = $state<[string, string, string]>(['0', '0', '1']);
+  let hklInput = $state<[string, string, string]>(['0', '0', '1']);
+
+  function parseTriple(t: readonly string[]): Vec3 | null {
+    const v = t.map((x) => Number(x.trim() === '' ? NaN : x));
+    return v.every(Number.isFinite) && v.some((x) => x !== 0) ? [v[0], v[1], v[2]] : null;
+  }
+  const uvwValue = $derived(parseTriple(uvwInput));
+  const hklValue = $derived(parseTriple(hklInput));
+
+  function viewAlong(direction: Vec3) {
+    if (!crystal || !view) return;
+    view.lookAlong(direction, defaultUp(crystal.lattice, direction));
+  }
+  const viewAlongUvw = (uvw: Vec3) => crystal && viewAlong(directionAlongUvw(crystal.lattice, uvw));
+  const viewNormalToHkl = (hkl: Vec3) =>
+    crystal && viewAlong(directionNormalToHkl(crystal.lattice, hkl));
+
+  /** Turn the structure like a goniometer: degrees right, up, and clockwise about the view axis. */
+  function turn(right: number, upward: number, roll: number) {
+    if (!view) return;
+    const s = view.viewState();
+    const f = rotateView({ direction: s.direction, up: s.up }, { right, upward, roll });
+    view.lookAlong(f.direction, f.up);
+  }
+
+  const step = $derived(
+    Number.isFinite(settings.tiltStep) && settings.tiltStep > 0 ? settings.tiltStep : 5,
+  );
+
+  /** After a mouse rotation: jump onto the zone axis if one is close enough and snapping is on. */
+  function onGestureEnd(rotated: boolean) {
+    if (!rotated || !settings.snapToZone || !crystal || !view) return;
+    const s = view.viewState();
+    const hit = snapToZoneAxis(
+      crystal.lattice,
+      s.direction,
+      settings.snapDegrees,
+      settings.snapMaxIndex,
+    );
+    if (hit) view.lookAlong(hit.direction, s.up);
+  }
+
+  const ARROWS: Record<string, [number, number]> = {
+    ArrowRight: [1, 0],
+    ArrowLeft: [-1, 0],
+    ArrowUp: [0, 1],
+    ArrowDown: [0, -1],
+  };
+
+  /**
+   * Arrow keys tilt by the step (Shift: 1 degree, Ctrl: 15 degrees) the way a drag in that direction
+   * would; Alt with Left/Right rolls about the view axis.
+   */
+  function onKeydown(e: KeyboardEvent) {
+    const a = ARROWS[e.key];
+    if (!a || e.metaKey || !view || !crystal) return;
+    e.preventDefault();
+    const size = e.shiftKey ? 1 : e.ctrlKey ? 15 : step;
+    if (e.altKey) turn(0, 0, a[0] * size);
+    else turn(a[0] * size, a[1] * size, 0);
   }
 
   function sizeOverlays() {
@@ -149,6 +260,7 @@
         selection = s;
       },
       onRender: onRendered,
+      onGestureEnd,
     });
     sizeOverlays();
     const observer = new ResizeObserver(() => {
@@ -393,15 +505,6 @@
 
   // ---- toolbar actions ---------------------------------------------------------------------------
 
-  function lookAlong(k: 0 | 1 | 2) {
-    if (!crystal || !view) return;
-    const M = crystal.lattice.M;
-    const dir: Vec3 = [M[0][k], M[1][k], M[2][k]];
-    // Keep b (or c when looking along b) pointing up the screen where possible.
-    const upIdx = k === 1 ? 2 : 1;
-    view.lookAlong(dir, [M[0][upIdx], M[1][upIdx], M[2][upIdx]]);
-  }
-
   const resetRange = () => {
     settings.range = defaultRange();
   };
@@ -445,12 +548,6 @@
       <input type="checkbox" bind:checked={measuring} data-testid="measure" /> Measure
     </label>
     <span class="group">
-      View along
-      <button type="button" onclick={() => lookAlong(0)}>a</button>
-      <button type="button" onclick={() => lookAlong(1)}>b</button>
-      <button type="button" onclick={() => lookAlong(2)}>c</button>
-    </span>
-    <span class="group">
       <button
         type="button"
         onclick={() => view?.resetOrientation()}
@@ -467,8 +564,137 @@
     </span>
   </div>
 
+  {#if crystal}
+    <div class="orient" data-testid="orientation">
+      <form
+        class="group"
+        onsubmit={(e) => {
+          e.preventDefault();
+          if (uvwValue) viewAlongUvw(uvwValue);
+        }}
+      >
+        View along [
+        {#each [0, 1, 2] as k (k)}
+          <input
+            class="idx"
+            bind:value={uvwInput[k]}
+            aria-label={`u v w, index ${k + 1}`}
+            data-testid={`uvw-${k}`}
+            inputmode="numeric"
+          />
+        {/each}
+        ]
+        <button type="submit" disabled={!uvwValue} data-testid="uvw-go">Go</button>
+      </form>
+      <form
+        class="group"
+        onsubmit={(e) => {
+          e.preventDefault();
+          if (hklValue) viewNormalToHkl(hklValue);
+        }}
+      >
+        View normal to (
+        {#each [0, 1, 2] as k (k)}
+          <input
+            class="idx"
+            bind:value={hklInput[k]}
+            aria-label={`h k l, index ${k + 1}`}
+            data-testid={`hkl-${k}`}
+            inputmode="numeric"
+          />
+        {/each}
+        )
+        <button type="submit" disabled={!hklValue} data-testid="hkl-go">Go</button>
+      </form>
+      <span class="group" aria-label="Quick views">
+        Along
+        <button type="button" onclick={() => viewAlongUvw([1, 0, 0])}>a</button>
+        <button type="button" onclick={() => viewAlongUvw([0, 1, 0])}>b</button>
+        <button type="button" onclick={() => viewAlongUvw([0, 0, 1])}>c</button>
+        Normal to
+        <button type="button" onclick={() => viewNormalToHkl([1, 0, 0])}>a*</button>
+        <button type="button" onclick={() => viewNormalToHkl([0, 1, 0])}>b*</button>
+        <button type="button" onclick={() => viewNormalToHkl([0, 0, 1])}>c*</button>
+      </span>
+      <span class="group" aria-label="Goniometer">
+        Tilt
+        <button type="button" onclick={() => turn(-step, 0, 0)} aria-label="Tilt left">◀</button>
+        <button type="button" onclick={() => turn(step, 0, 0)} aria-label="Tilt right">▶</button>
+        <button type="button" onclick={() => turn(0, step, 0)} aria-label="Tilt up">▲</button>
+        <button type="button" onclick={() => turn(0, -step, 0)} aria-label="Tilt down">▼</button>
+        by
+        <input
+          class="idx"
+          type="number"
+          min="0.1"
+          max="90"
+          step="0.5"
+          bind:value={settings.tiltStep}
+          aria-label="Tilt step in degrees"
+          data-testid="tilt-step"
+        />°
+        <button type="button" onclick={() => turn(0, 0, -90)} title="Rotate 90° anticlockwise"
+          >⟲ 90°</button
+        >
+        <button type="button" onclick={() => turn(0, 0, 90)} title="Rotate 90° clockwise"
+          >⟳ 90°</button
+        >
+      </span>
+      <span class="group">
+        <button
+          type="button"
+          aria-pressed={settings.snapToZone}
+          class:on={settings.snapToZone}
+          onclick={() => (settings.snapToZone = !settings.snapToZone)}
+          title="When on, releasing a mouse rotation within the angle at right of a zone axis snaps onto it"
+          data-testid="snap">Snap to zone axis: {settings.snapToZone ? 'on' : 'off'}</button
+        >
+        within
+        <input
+          class="idx"
+          type="number"
+          min="0.1"
+          max="45"
+          step="0.5"
+          bind:value={settings.snapDegrees}
+          aria-label="Snap angle in degrees"
+          data-testid="snap-degrees"
+        />° of axes up to index
+        <input
+          class="idx"
+          type="number"
+          min="1"
+          max="6"
+          step="1"
+          bind:value={settings.snapMaxIndex}
+          aria-label="Largest zone-axis index to snap to"
+          data-testid="snap-index"
+        />
+      </span>
+      <span class="readout" data-testid="orientation-readout">
+        {#if orientation.ready && orientation.uvw && orientation.hkl}
+          Looking along [{orientation.uvw.indices.join(' ')}] ({fmt(orientation.uvw.angleDeg, 2)}°
+          off) · normal to ({orientation.hkl.indices.join(' ')}) ({fmt(
+            orientation.hkl.angleDeg,
+            2,
+          )}° off)
+        {/if}
+      </span>
+    </div>
+  {/if}
+
   <div class="layout" class:withPanel={crystal !== null}>
-    <div class="stage" bind:this={stage} style:background={settings.appearance.background}>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <div
+      class="stage"
+      bind:this={stage}
+      style:background={settings.appearance.background}
+      tabindex="0"
+      role="application"
+      aria-label="3D structure. Arrow keys tilt it."
+      onkeydown={onKeydown}
+      onpointerdown={() => stage?.focus({ preventScroll: true })}
+    >
       <canvas bind:this={canvas} data-testid="viewer-canvas"></canvas>
       <canvas bind:this={labelCanvas} class="overlay" data-testid="label-canvas"></canvas>
 
@@ -527,8 +753,9 @@
     <p class="warn" role="status">{w}</p>
   {/each}
   <p class="hint">
-    Drag to rotate, wheel to zoom, right-drag to pan. Click an atom to select it; turn on Measure
-    and click 2, 3 or 4 atoms for a distance, angle or torsion.
+    Drag to rotate, wheel to zoom, right-drag to pan; click the view and use the arrow keys to tilt
+    (Shift: 1°, Ctrl: 15°, Alt+Left/Right: roll). Click an atom to select it; turn on Measure and
+    click 2, 3 or 4 atoms for a distance, angle or torsion.
   </p>
 </section>
 
@@ -553,6 +780,31 @@
     display: inline-flex;
     gap: 0.3rem;
     align-items: center;
+  }
+  .orient {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    align-items: center;
+    margin-bottom: 0.6rem;
+    font-size: 0.85rem;
+  }
+  .idx {
+    width: 3rem;
+    padding: 0.1rem 0.25rem;
+    text-align: center;
+  }
+  button.on {
+    background: #dbe7ff;
+    border-color: #6b8fd6;
+  }
+  .readout {
+    font: 0.8rem var(--mono);
+    color: #3a4a66;
+  }
+  .stage:focus-visible {
+    outline: 2px solid #6b8fd6;
+    outline-offset: 1px;
   }
   .inline {
     display: inline-flex;
