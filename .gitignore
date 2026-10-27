@@ -12,3 +12,7 @@ test-results/
 coverage/
 app/src/wasm/
 app/tests/cod_sample/
+
+# Local project notes, not published
+/context.md
+/TESTING.md

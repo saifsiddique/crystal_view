@@ -97,7 +97,6 @@ npm run build         # production build in app/dist
 
 Checks: `npm run format:check`, `npm run lint`, `npm run check`, `npm test` (unit tests),
 `npm run test:rust` and `npm run test:e2e` (browser tests). GitHub runs them on every push and
-publishes the site from the `main` branch. [`context.md`](context.md) is the project plan and
-design notes, and [`TESTING.md`](TESTING.md) lists how to check each part by hand.
+publishes the site from the `main` branch.
 
 Built with Svelte 5, TypeScript, Vite, Three.js and a Rust (WebAssembly) kernel.
