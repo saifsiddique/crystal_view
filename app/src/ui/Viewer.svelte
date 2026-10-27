@@ -34,7 +34,7 @@
   import { paintLegend, safeName } from '../export/browser';
   import { structureImageRows, structureRows, type ExportSection } from '../export/rows';
   import { labelMap } from '../export/svg3d';
-  import { StructureView } from '../render/structureView';
+  import { StructureView, type CameraState } from '../render/structureView';
   import ExportMenu from './ExportMenu.svelte';
   import { orientation } from './orientation.svelte';
   import Logo from './Logo.svelte';
@@ -275,6 +275,7 @@
   // ---- mounting ---------------------------------------------------------------------------------
 
   let lastApplyMs = 0;
+  let lastBuildMs = 0;
 
   onMount(() => {
     view = new StructureView(canvas, {
@@ -312,6 +313,8 @@
       settings: () => $state.snapshot(settings),
       bondsDrawn: () => view!.bondsDrawn,
       appearanceMs: () => lastApplyMs,
+      buildMs: () => lastBuildMs,
+      turn: (right: number, upward: number, roll: number) => turn(right, upward, roll),
       polyhedra: () => ({ ...polyhedraInfo }),
       legend: () => legend.map((e) => ({ ...e })),
     };
@@ -325,11 +328,30 @@
   });
 
   // ---- a new crystal starts with fresh settings (keeping the user's preferences) -----------------
+  // With several files open, each keeps its settings and camera while another one is shown.
+
+  const kept = new WeakMap<Crystal, { settings: ViewSettings; camera: CameraState | null }>();
+  let shownCrystal: Crystal | null = null;
+  /** The camera to put back when the structure of a file shown before is built again. */
+  let restoreCamera: CameraState | null = null;
 
   $effect(() => {
     const c = crystal;
     untrack(() => {
-      settings = c ? settingsForNewCrystal(settings, c) : defaultViewSettings(null);
+      if (c === shownCrystal) return;
+      if (shownCrystal)
+        kept.set(shownCrystal, {
+          settings: $state.snapshot(settings),
+          camera: view?.cameraState() ?? null,
+        });
+      shownCrystal = c;
+      const saved = c ? kept.get(c) : undefined;
+      settings = saved
+        ? structuredClone(saved.settings)
+        : c
+          ? settingsForNewCrystal(settings, c)
+          : defaultViewSettings(null);
+      restoreCamera = saved?.camera ?? null;
       fresh = true;
     });
   });
@@ -363,17 +385,21 @@
       }
       try {
         const snap = $state.snapshot(settings);
+        const t0 = performance.now();
         const built = buildModel(c, {
           range: snap.range,
           boundary: snap.range.boundary,
           slab: snap.range.slab,
           bonds: snap.bonds,
         });
+        lastBuildMs = performance.now() - t0;
         model = built;
         modelRevision++;
         modelWarnings = built.warnings;
-        // Same crystal, new range or rules: keep the user's orientation and zoom.
-        view!.setStructure(built, c.lattice, !fresh);
+        // Same crystal, new range or rules: keep the user's orientation and zoom; a file shown
+        // before gets its own camera back.
+        view!.setStructure(built, c.lattice, restoreCamera ?? !fresh);
+        restoreCamera = null;
         fresh = false;
         view!.setSelectionLimit(measuring ? 4 : 0);
         selection = [];

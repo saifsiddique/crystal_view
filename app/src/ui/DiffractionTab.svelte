@@ -49,7 +49,7 @@
   import { downloadText, safeName, svgSize } from '../export/browser';
   import { spotsToCsv } from '../export/csv';
   import { structureImageRows, svgImageRows, type ExportSection } from '../export/rows';
-  import { StructureView } from '../render/structureView';
+  import { StructureView, type CameraState } from '../render/structureView';
   import {
     defaultEDSettings,
     MAX_ABSORPTION,
@@ -319,7 +319,10 @@
   $effect(() => {
     const d = dynamic;
     if (!d) return;
-    if (d.crystal !== crystal || d.key !== dynKey) {
+    if (d.crystal !== crystal) {
+      dynamic = null;
+      dynNote = '';
+    } else if (d.key !== dynKey) {
       dynamic = null;
       dynNote =
         'A setting changed, so the kinematic pattern is back. Calculate again to update it.';
@@ -517,18 +520,48 @@
     view.lookAlong(d, defaultUp(crystal.lattice, d));
   }
 
-  // A new crystal: fresh range and the default zone axis.
+  // A new crystal: fresh range and the default zone axis. With several files open, each keeps its
+  // settings, orientation and pattern view while another one is shown (not its dynamical result).
+  interface Kept {
+    settings: EDSettings;
+    camera: CameraState | null;
+    typedAxis: Vec3 | null;
+    uvwInput: [string, string, string];
+    patternView: PatternView;
+  }
+  const kept = new WeakMap<Crystal, Kept>();
   let shownCrystal: Crystal | null = null;
+  /** The camera to put back when the structure of a file shown before is built again. */
+  let restoreCamera: CameraState | null = null;
+
   $effect(() => {
     const c = crystal;
     untrack(() => {
       if (c === shownCrystal) return;
+      if (shownCrystal)
+        kept.set(shownCrystal, {
+          settings: $state.snapshot(settings),
+          camera: view?.cameraState() ?? null,
+          typedAxis,
+          uvwInput: [...uvwInput],
+          patternView: { ...patternView },
+        });
       shownCrystal = c;
+      selected = [];
+      frame = null;
+      const saved = c ? kept.get(c) : undefined;
+      if (saved) {
+        settings = structuredClone(saved.settings);
+        uvwInput = [...saved.uvwInput];
+        typedAxis = saved.typedAxis;
+        restoreCamera = saved.camera;
+        patternView = { ...saved.patternView };
+        return;
+      }
+      restoreCamera = null;
       settings.range = defaultEDSettings().range;
       settings.zoneAxis = [0, 0, 1];
       uvwInput = ['0', '0', '1'];
-      selected = [];
-      frame = null;
       typedAxis = null;
       patternPanel?.fit();
     });
@@ -560,8 +593,10 @@
           bonds: { rules: $state.snapshot(viewSettings.bonds.rules) },
         });
         model = m;
-        view!.setStructure(m, c.lattice, keepView);
-        if (!keepView) lookAlongUvw(settings.zoneAxis);
+        const restore = keepView ? null : restoreCamera;
+        restoreCamera = null;
+        view!.setStructure(m, c.lattice, restore ?? keepView);
+        if (!keepView && !restore) lookAlongUvw(settings.zoneAxis);
         error = '';
       } catch (e) {
         model = null;

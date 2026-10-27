@@ -5,6 +5,7 @@
 import type { CifWarning } from './cif/tokenizer';
 import type { AnisoU, CifStructure } from './cif/structure';
 import { gcd } from './math/integers';
+import { formulaRank } from './elements';
 import { buildLattice, type Lattice } from './lattice';
 import type { Mat3 } from './math/mat3';
 import type { Vec3 } from './math/vec3';
@@ -241,6 +242,26 @@ function hillFormula(counts: Record<string, number>, divisor: number): string {
       return n === 1 ? e : `${e}${n}`;
     })
     .join(' ');
+}
+
+/**
+ * A short formula without spaces for labels, e.g. 'TiO2', 'NaAlSi3O8', 'ErTe3': per formula unit,
+ * the elements in the IUPAC sequence (Hill order, C then H first, when both are present).
+ */
+export function compactFormula(summary: Pick<CrystalSummary, 'counts' | 'Z'>): string {
+  const counts = summary.counts;
+  const elements = Object.keys(counts);
+  const organic = elements.includes('C') && elements.includes('H');
+  const order = organic
+    ? ['C', 'H', ...elements.filter((e) => e !== 'C' && e !== 'H').sort()]
+    : elements.sort((a, b) => formulaRank(a) - formulaRank(b) || a.localeCompare(b));
+  const divisor = summary.Z && summary.Z > 0 ? summary.Z : 1;
+  return order
+    .map((e) => {
+      const n = Math.round((counts[e] / divisor) * 1e3) / 1e3;
+      return n === 1 ? e : `${e}${n}`;
+    })
+    .join('');
 }
 
 function summarize(atoms: Atom[], volume: number): CrystalSummary {

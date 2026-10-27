@@ -15,10 +15,10 @@
 
 <script lang="ts">
   // Opening structures: CIFs from disk (button or drag and drop, several at once). Each open file
-  // is a card with its chemical name and space group; clicking a card shows that structure in
+  // is a card with its formula (TiO2, ErTe3) and space group; clicking a card shows that structure in
   // every tab, its × closes it. A file with several data blocks gets a chooser for the shown card.
   import { parseCif, type BlockOutcome } from '../core/cif';
-  import { buildCrystal } from '../core/crystal';
+  import { buildCrystal, compactFormula } from '../core/crystal';
   import SpaceGroupSymbol from './SpaceGroupSymbol.svelte';
 
   let { onLoad }: { onLoad: (loaded: Loaded) => void } = $props();
@@ -136,7 +136,13 @@
     show(updated);
   }
 
-  const nameOf = (c: Crystal) => c.chemicalName ?? c.summary.formula;
+  /** The card's label: the formula, its numbers as subscripts. */
+  const formulaParts = (c: Crystal) =>
+    compactFormula(c.summary)
+      .split(/(\d+(?:\.\d+)?)/)
+      .filter((t) => t !== '')
+      .map((t) => ({ text: t, sub: /^\d/.test(t) }));
+  const nameOf = (c: Crystal) => compactFormula(c.summary);
 
   function onFile(event: Event) {
     const el = event.currentTarget as HTMLInputElement;
@@ -191,7 +197,7 @@
         <li
           class="cif"
           class:active={f.id === activeId}
-          title={`${f.fileName} · ${f.crystal.summary.formula}`}
+          title={[f.crystal.chemicalName, f.fileName].filter(Boolean).join(' · ')}
           data-testid="cif-card"
         >
           <button
@@ -201,7 +207,10 @@
             onclick={() => f.id !== activeId && show(f)}
             data-testid="cif-card-select"
           >
-            <span class="name" data-testid="cif-card-name">{nameOf(f.crystal)}</span>
+            <span class="name" data-testid="cif-card-name"
+              >{#each formulaParts(f.crystal) as part, k (k)}{#if part.sub}<sub>{part.text}</sub
+                  >{:else}{part.text}{/if}{/each}</span
+            >
             {#if f.crystal.spaceGroup.symbol}
               <span class="sg" data-testid="cif-card-sg"
                 ><SpaceGroupSymbol symbol={f.crystal.spaceGroup.symbol} /></span
@@ -330,6 +339,10 @@
     gap: 0.5rem;
     padding: 0.3rem 0.4rem 0.3rem 0.7rem;
     max-width: 18rem;
+  }
+  .name sub {
+    font-size: 0.72em;
+    line-height: 0;
   }
   .name {
     font-weight: 600;

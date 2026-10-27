@@ -86,6 +86,15 @@ const SRGB_TO_LINEAR = new Float32Array(256).map((_, i) => {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 });
 
+/** Where the camera is, in the crystal's Cartesian frame (angstrom). */
+export interface CameraState {
+  position: Vec3;
+  target: Vec3;
+  up: Vec3;
+  /** Height of the orthographic view in angstrom. */
+  worldPerPixel: number;
+}
+
 export class StructureView {
   readonly stats: ViewStats = { fps: 0, frames: 0, renders: 0 };
 
@@ -202,24 +211,46 @@ export class StructureView {
   // ---- public API ------------------------------------------------------------------------------
 
   /**
+   * The camera in the crystal's Cartesian frame (independent of the structure's centring): pass it
+   * to `setStructure` later to come back to this orientation, pan and magnification.
+   */
+  cameraState(): CameraState | null {
+    if (!this.model) return null;
+    const o = this.origin;
+    const p = this.camera.position;
+    const t = this.controls.target;
+    return {
+      position: [p.x + o[0], p.y + o[1], p.z + o[2]],
+      target: [t.x + o[0], t.y + o[1], t.z + o[2]],
+      up: [this.camera.up.x, this.camera.up.y, this.camera.up.z],
+      worldPerPixel: this.viewHeight() / this.ortho.zoom,
+    };
+  }
+
+  /**
    * Replace the structure. Rebuilds every instance buffer. The camera is reset to the default
    * view, unless `keepView` is set (same crystal, different range): then the orientation, pan and
-   * magnification stay where the user left them.
+   * magnification stay where the user left them. A `CameraState` (from `cameraState`) puts the
+   * camera back where it was when that state was taken.
    */
-  setStructure(model: StructureModel, lattice: Lattice, keepView = false): void {
+  setStructure(
+    model: StructureModel,
+    lattice: Lattice,
+    keepView: boolean | CameraState = false,
+  ): void {
     let saved: {
       position: Vector3;
       target: Vector3;
       up: Vector3;
       worldPerPixel: number;
     } | null = null;
-    if (keepView && this.model) {
-      const o = this.origin;
+    const state = typeof keepView === 'object' ? keepView : keepView ? this.cameraState() : null;
+    if (state) {
       saved = {
-        position: this.camera.position.clone().add(new Vector3(o[0], o[1], o[2])),
-        target: this.controls.target.clone().add(new Vector3(o[0], o[1], o[2])),
-        up: this.camera.up.clone(),
-        worldPerPixel: this.viewHeight() / this.ortho.zoom,
+        position: new Vector3(...state.position),
+        target: new Vector3(...state.target),
+        up: new Vector3(...state.up),
+        worldPerPixel: state.worldPerPixel,
       };
     }
     this.clearStructure();

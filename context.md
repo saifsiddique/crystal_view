@@ -30,9 +30,9 @@
 | M10 | Kikuchi lines & HOLZ (geometric) | M8 | ✅ done 2026-10-26 (see §7.M10) |
 | M11 | Dynamical diffraction (Bloch wave, WASM) | M8, M10 | ✅ reduced scope done 2026-10-27: spot pattern on request, no thickness series or CBED (see §7.M11) |
 | M12 | Export (PNG / SVG / CSV / CIF / session) | M6, M8, M9 | ✅ reduced scope done 2026-10-27, no session file (see §7.M12) |
-| M13 | COD search + CORS proxy | M2 | ⏭ skipped by the user 2026-10-27 (no added value) |
-| M14 | App shell, menus, panels, PWA | M0 (grows with all) | ⏭ skipped by the user 2026-10-27; several open CIFs as cards done instead (see §7.M12 multi-CIF) |
-| M15 | Performance audit & desktop escape hatch | all | ☐ |
+| M13 | COD search + CORS proxy | M2 | ✖ not being implemented (user's decision 2026-10-27: no added value) |
+| M14 | App shell, menus, panels, PWA | M0 (grows with all) | ✖ not being implemented (user's decision 2026-10-27); several open CIFs as cards done instead (see §7.M12) |
+| M15 | Performance audit & desktop escape hatch | all | ✅ audit done 2026-10-27: no desktop app needed (see §7.M15); optimisation not started |
 
 Suggested order: M0 → M1 → M2 → M3 → M4 → M14 (skeleton) → M5 → M6 → M7 → M8 → M9 → M12 → M13 → M10 → M11 → M15.
 You have a usable "better v6" after M8.
@@ -984,13 +984,16 @@ This replaces the statements above about where the menus, the ribbon groups and 
 
 #### Several open CIFs (2026-10-27, asked by the user, in place of M13/M14)
 
-- The Open CIF bar takes several files at once (button with `multiple`, or drop). After the button and the drop hint comes a vertical divider, then **one card per open file**: its chemical name (`_chemical_name_mineral`, else `_common`, else `_systematic`; the Hill formula when the CIF has none) and its space group, and a **×** to close it. The file name and formula are in the card's tooltip. Opened files are added after the existing cards; the last one opened is shown.
-- Clicking a card shows that structure in all three tabs (each tab starts fresh for it, as when a file is opened: view settings are not kept per card). Closing the shown card shows its right neighbour (else the left one); closing the last leaves the empty page.
+- The Open CIF bar takes several files at once (button with `multiple`, or drop). After the button and the drop hint comes a vertical divider, then **one card per open file**: its **formula** with subscripts (TiO₂, ErTe₃, NaAlSi₃O₈; per formula unit, elements in the IUPAC sequence of Red Book Table VI, `compactFormula` in `core/crystal.ts`; Hill order for organics with C and H) and its space group, and a **×** to close it. The chemical name (`_chemical_name_mineral`, else `_common`, else `_systematic`) and the file name are in the card's tooltip. (First version showed the chemical name on the card; the user asked for the formula to save space.) Opened files are added after the existing cards; the last one opened is shown.
+- Clicking a card shows that structure in all three tabs. **Each file keeps its own state** while another is shown, per tab, in a `WeakMap` keyed by its `Crystal` (freed when the card is closed): Structure Viewer settings (style, range, bonds, colours, hidden atoms, polyhedra, ...) and camera (orientation, pan, zoom; `StructureView.cameraState()` / `setStructure(…, CameraState)`); Electron Diffraction settings, the left view's camera, the typed zone axis and the pattern's zoom and pan (a dynamical result is dropped on switching); Powder XRD settings, March axis and plot view. A file a tab has not shown yet starts like a newly opened file (that tab's current settings, default range and zone axis). Closing the shown card shows its right neighbour (else the left one); closing the last leaves the empty page.
 - More than **10** open structures bring a warning (each is kept in memory and switching rebuilds every view); more than **40** are refused with a message (files beyond 40 are not opened). A file that is not a CIF is reported by name and gets no card; the others still open. A file with several data blocks keeps its chooser, for the shown card.
 - `chemicalName` is a new field of `CifStructure` and `Crystal`, separate from `title` (which prefers `_publ_section_title`); the CIF writer writes it as `_chemical_name_common`, so files round-trip.
-- Tests: `multi.spec.ts` (4 browser tests: cards and order, divider position, switching tabs between cards, closing, bad file, the 10/40 limits) and a parser unit test; 103 browser tests and 537 unit tests pass.
+- Tests: `multi.spec.ts` (5 browser tests: cards, formula and tooltip, divider position, switching between cards, closing, bad file, the 10/40 limits, and each file keeping its viewer, camera, ED and XRD state; the camera check fails when the restore is removed), unit tests of the parser and of `compactFormula`; 104 browser tests and 540 unit tests pass.
 
 ### M13: COD search + CORS proxy  *(3–5 d)*
+
+> **Not being implemented** (the user's decision, 2026-10-27: it would not add value). The plan below is kept for the record.
+
 **Goal:** find and load structures without leaving the app.
 
 **Proxy (`proxy/`, Cloudflare Worker):**
@@ -1015,6 +1018,9 @@ This replaces the statements above about where the menus, the ribbon groups and 
 ---
 
 ### M14: App shell, menus, panels, PWA  *(ongoing; initial skeleton 4–6 d)*
+
+> **Not being implemented** (the user's decision, 2026-10-27). The shell grew with the modules instead (tabs, panel headers, sidebars, several open CIFs). The plan below is kept for the record.
+
 **Goal:** a desktop-application feel in the browser.
 
 - **Layout:**
@@ -1058,6 +1064,36 @@ This replaces the statements above about where the menus, the ribbon groups and 
 - (c) native file-system integration becomes a hard requirement.
 
 The wrapper reuses `app/` unchanged and calls the `kernels/` crate natively, with multi-threading through `rayon`. Expect 1–2 weeks for it.
+
+
+#### M15 status: ✅ audit done 2026-10-27, **no desktop app needed**; optimisation not started
+
+**How it was measured.** `tests/e2e/bench.spec.ts` (Playwright, production build) measures every budget inside the page with `performance.now()`, from the action to the next drawn frame, and writes JSON to `BENCH_OUT`. It is skipped unless `BENCH=1`: `BENCH=1 npx playwright test tests/e2e/bench.spec.ts --workers=1 --headed` (headed, so that WebGL runs on the GPU; headless Chromium draws with SwiftShader on the CPU and its frame rates mean nothing). Two hooks were added for it: `buildMs()` and `turn()` on `window.__crystallens`.
+
+**Machine:** 2 × Xeon Silver 4210R (40 threads, 3.2 GHz turbo), NVIDIA RTX A4000, 64 GB, Chrome via Playwright (ANGLE/D3D11). Note: this is much faster than the reference laptop in threads and GPU, but its single core is not faster than a current laptop's, and all the timed work below runs on one core (the UI thread or the one compute worker); so the CPU numbers should carry over roughly, the frame rates not.
+
+| Operation | Budget | Measured | Verdict |
+|---|---|---|---|
+| CIF load → first render (≤ 200 atoms/cell) | < 500 ms | 70-180 ms (Si, albite, COD 7011033 with 200 atoms); 176 ms for 2364 atoms/cell, 354 ms for 11504 | ✅ |
+| 3D rotate, 10⁵ atoms (Si 23³ cells: 100 580 atoms, 194 672 bonds) | ≥ 50 fps | 56 fps = the display's refresh, p95 frame 18.5 ms; same without bonds and space filling (RTX A4000) | ✅ here; an integrated GPU is not measured |
+| Range/bond recompute, 10⁴ atoms | < 150 ms | 140 ms to the drawn frame for 11 408 atoms (build 38 ms, appearance 30 ms); 450 ms for 10⁵ | ✅ (tight) |
+| Kinematic ED update (zone axis typed) | < 50 ms | Si 39 ms (compute 6 ms); albite 67 ms (compute 44 ms) to the drawn frame | ✅ compute / ⚠ albite drawing 1.3× |
+| PXRD update | < 200 ms | Si 13 ms, albite 28 ms | ✅ |
+| Kikuchi/HOLZ drag update | < 50 ms | Si 16 ms, albite 32 ms (max 69 ms) | ✅ |
+| Bloch zone-axis solve (200 beams) | < 1 s | 0.47-0.49 s (Si [110], albite [001]); 150 beams 0.33 s, 300 beams 1.5 s, 400 beams 3.8 s (≈ n³) | ✅ |
+| CBED 48×48 (150 beams) | < 20 s | not implemented; estimate 2304 × 0.33 s = 760 s on one worker, ≈ 110 s with 7 workers on an 8-thread laptop | ✖ 5.5× (as the code is now) |
+| Switching between open CIFs | – | 50-150 ms (median 69 ms) | ✅ |
+| Memory, 40 open CIFs | – | JS heap 50 MB (12.5 MB with 2) | ✅ |
+
+**Misses outside the budget table (very large cells):** a metal-organic framework with 11 504 atoms/cell (COD 4128587) takes 49 s per ED zone-axis change (6 min for the first pattern, which is recomputed while the panel settles) and 12 s per PXRD update; COD 1552147 (2364 atoms/cell) 8.6 s per PXRD update. The cause is the same in both: the number of reflections in a huge cell (tens of thousands inside the pattern or the 2θ range) times the atoms, summed in plain JavaScript on one thread (|F| is cached per hkl, so orientation is not the problem). Typical inorganic cells (≤ 200 atoms) are far inside the budgets.
+
+**Desktop decision: not needed.** None of the three triggers holds:
+- (a) The implemented dynamical feature (zone-axis Bloch solve) is inside its budget (0.48 s for 200 beams). CBED is not implemented; the 5.5× gap of the estimate is before any optimisation, and the browser has the same tools as Tauri for it: the Bloch solver is still plain JS (a WASM + SIMD eigen-solver is typically 3-10× faster), and a worker pool (one per thread, `SharedArrayBuffer` with COOP/COEP) parallelises the 2304 independent pixels. Together that is expected to reach the 20 s budget or be within 3× of it, so the trigger (more than 3× over after optimisation) is not expected to fire. Re-check if CBED is ever built.
+- (b) Dynamical Kikuchi master patterns are not wanted (not asked for).
+- (c) Native file-system integration is not a requirement (files open by button or drop; exports download).
+- The large-cell misses are algorithmic and fixable in the browser: skip the structure factor of reflections whose excitation error already makes them invisible (bound |F| ≤ Σ f), compute structure factors in WASM in the worker (or a pool), and move the PXRD peak list off the UI thread.
+
+**Optimisation candidates, in order of value (not started, waiting for the user):** (1) large cells in ED and PXRD as above; (2) a WASM Bloch solver and a worker pool, if CBED is wanted; (3) albite-size ED updates (67 ms, of which 44 ms computing: a new zone axis brings new reflections whose |F| is not cached yet; the rest is the SVG redraw); (4) the range recompute is at its budget for 10⁴ atoms.
 
 ---
 

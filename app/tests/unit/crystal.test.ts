@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseFirstStructure, type CifStructure } from '../../src/core/cif';
-import { buildCrystal } from '../../src/core/crystal';
+import { buildCrystal, compactFormula } from '../../src/core/crystal';
 import { SymmetryError } from '../../src/core/errors';
 import { periodicDistance } from '../../src/core/symmetry/expand';
 import {
@@ -280,5 +280,32 @@ describe('robustness of the symmetry step', () => {
     }));
     const { crystal } = buildCrystal({ ...s, symops: ['x,y,z'], spaceGroup: {}, atoms: grid });
     expect(crystal.atoms).toHaveLength(30);
+  });
+});
+
+describe('compact formula for labels', () => {
+  const f = (counts: Record<string, number>, Z?: number) => compactFormula({ counts, Z });
+  it('puts the electropositive element first, by the IUPAC sequence', () => {
+    expect(f({ O: 4, Ti: 2 }, 2)).toBe('TiO2');
+    expect(f({ Cl: 4, Na: 4 }, 4)).toBe('NaCl');
+    expect(f({ Ge: 4, Fe: 4 }, 4)).toBe('FeGe');
+    expect(f({ Te: 12, Er: 4 }, 4)).toBe('ErTe3');
+    expect(f({ Te: 2, Pt: 1 }, 1)).toBe('PtTe2'); // electronegativity alone would put Te first
+    expect(f({ O: 32, Si: 12, Al: 4, Na: 4 }, 4)).toBe('NaAlSi3O8');
+  });
+  it('keeps fractions, and Hill order for organics', () => {
+    expect(f({ Mg: 7.2, Fe: 0.8, Si: 4, O: 16 }, 4)).toBe('Mg1.8Fe0.2SiO4');
+    expect(f({ O: 2, H: 6, C: 2 }, 1)).toBe('C2H6O2');
+  });
+  it('labels the fixture files as a chemist writes them', () => {
+    const label = (name: string) =>
+      compactFormula(
+        buildCrystal(
+          parseFirstStructure(readFileSync(`${fixtureDir}cifs/${name}.cif`, 'utf8')).structure,
+        ).crystal.summary,
+      );
+    expect(label('rutile')).toBe('TiO2');
+    expect(label('albite')).toBe('NaAlSi3O8');
+    expect(label('ZrO2_baddeleyite')).toBe('ZrO2');
   });
 });

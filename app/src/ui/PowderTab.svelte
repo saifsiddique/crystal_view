@@ -42,6 +42,33 @@
 
   const fmt = (x: number, d = 4) => (Number.isFinite(x) ? x.toFixed(d) : '–');
 
+  // ---- several open files: each keeps its settings and plot view while another one is shown ------
+
+  const kept = new WeakMap<Crystal, { settings: PXRDSettings; view: PlotView; hklText: string }>();
+  let shownCrystal: Crystal | null = null;
+  /** The plot view to put back instead of fitting, once the profile of a file shown before is in. */
+  let restoreView: PlotView | null = null;
+
+  $effect(() => {
+    const c = crystal;
+    untrack(() => {
+      if (c === shownCrystal) return;
+      if (shownCrystal)
+        kept.set(shownCrystal, {
+          settings: $state.snapshot(settings),
+          view: { ...plotView },
+          hklText,
+        });
+      shownCrystal = c;
+      const saved = c ? kept.get(c) : undefined;
+      restoreView = saved ? { ...saved.view } : null;
+      if (saved) {
+        settings = structuredClone(saved.settings);
+        hklText = saved.hklText;
+      }
+    });
+  });
+
   // ---- radiation ------------------------------------------------------------------------------------
 
   const anode = $derived(XRAY_DOUBLETS.find((d) => d.id === settings.radiation) ?? null);
@@ -154,9 +181,11 @@
       settings.zeroShift,
       profile ? 1 : 0,
     ].join('|');
-    if (!profile || key === fitKey) return;
+    if (!profile || (key === fitKey && !restoreView)) return;
     fitKey = key;
-    void tick().then(() => plot?.fit());
+    const back = restoreView;
+    restoreView = null;
+    void tick().then(() => (back ? (plotView = back) : plot?.fit()));
   });
 
   $effect(() => {

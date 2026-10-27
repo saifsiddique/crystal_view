@@ -13,6 +13,8 @@ interface CrystalLensHook {
   };
   bondsDrawn(): boolean;
   appearanceMs(): number;
+  buildMs(): number;
+  turn(right: number, upward: number, roll: number): void;
   polyhedra(): { count: number; skipped: number };
   legend(): { label: string; color: string }[];
 }
