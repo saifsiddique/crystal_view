@@ -11,8 +11,7 @@ Nothing is uploaded: your CIF files are read and calculated in your own browser.
 
 ## Credit
 
-This project is built upon the work of **Lisa Zhou**, the author of the original
-**strFac_app**, a browser tool that calculates structure factors and diffraction from CIF files.
+This project is built upon the work of **Lisa Zhou**, Cornell MSE 2026, a browser tool that calculates structure factors and diffraction from CIF files.
 The original prototypes are kept unchanged in [`legacy/`](legacy/) as the reference this version
 grew from.
 
