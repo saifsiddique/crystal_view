@@ -108,5 +108,5 @@ test('a dropped CIF loads like an opened one', async ({ page }) => {
   }, text);
   await page.locator('section.load').dispatchEvent('drop', { dataTransfer: data });
   await expect(page.getByTestId('hud')).toContainText('27 atoms');
-  await expect(page.getByTestId('loaded')).toContainText('NaCl.cif');
+  await expect(page.getByTestId('cif-card-name')).toHaveText(['Sodium chloride']);
 });

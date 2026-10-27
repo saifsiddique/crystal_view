@@ -32,5 +32,6 @@ export function toP1Structure(crystal: Crystal): CifStructure {
     }),
   };
   if (crystal.title) structure.title = crystal.title;
+  if (crystal.chemicalName) structure.chemicalName = crystal.chemicalName;
   return structure;
 }

@@ -54,6 +54,8 @@ export interface CifStructure {
   /** Data block name, e.g. '9008565' or '631185-ICSD'. */
   name: string;
   title?: string;
+  /** Mineral, common or systematic name, the first one given. */
+  chemicalName?: string;
   formula?: string;
   cell: Cell;
   spaceGroup: { hm?: string; hall?: string; number?: number };
@@ -295,6 +297,10 @@ export function blockToStructure(block: CifBlock): StructureResult {
     ),
   );
   if (title) structure.title = title;
+  const chemicalName = clean(
+    item(block, '_chemical_name_mineral', '_chemical_name_common', '_chemical_name_systematic'),
+  );
+  if (chemicalName) structure.chemicalName = chemicalName;
   const formula = clean(item(block, '_chemical_formula_sum', '_chemical_formula_moiety'));
   if (formula) structure.formula = formula;
   const cod = clean(item(block, '_cod_database_code'));

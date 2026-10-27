@@ -103,6 +103,8 @@ export interface CrystalSummary {
 export interface Crystal {
   name: string;
   title?: string;
+  /** Mineral, common or systematic name from the CIF. */
+  chemicalName?: string;
   ids: { cod?: string; icsd?: string };
   cell: Cell;
   lattice: Lattice;
@@ -342,5 +344,6 @@ export function buildCrystal(s: CifStructure): CrystalResult {
     summary: summarize(atoms, lattice.volume),
   };
   if (s.title) crystal.title = s.title;
+  if (s.chemicalName) crystal.chemicalName = s.chemicalName;
   return { crystal, warnings };
 }

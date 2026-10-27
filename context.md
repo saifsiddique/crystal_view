@@ -30,8 +30,8 @@
 | M10 | Kikuchi lines & HOLZ (geometric) | M8 | ✅ done 2026-10-26 (see §7.M10) |
 | M11 | Dynamical diffraction (Bloch wave, WASM) | M8, M10 | ✅ reduced scope done 2026-10-27: spot pattern on request, no thickness series or CBED (see §7.M11) |
 | M12 | Export (PNG / SVG / CSV / CIF / session) | M6, M8, M9 | ✅ reduced scope done 2026-10-27, no session file (see §7.M12) |
-| M13 | COD search + CORS proxy | M2 | ☐ |
-| M14 | App shell, menus, panels, PWA | M0 (grows with all) | ☐ |
+| M13 | COD search + CORS proxy | M2 | ⏭ skipped by the user 2026-10-27 (no added value) |
+| M14 | App shell, menus, panels, PWA | M0 (grows with all) | ⏭ skipped by the user 2026-10-27; several open CIFs as cards done instead (see §7.M12 multi-CIF) |
 | M15 | Performance audit & desktop escape hatch | all | ☐ |
 
 Suggested order: M0 → M1 → M2 → M3 → M4 → M14 (skeleton) → M5 → M6 → M7 → M8 → M9 → M12 → M13 → M10 → M11 → M15.
@@ -981,6 +981,14 @@ This replaces the statements above about where the menus, the ribbon groups and 
 - Tests: `m12.spec.ts` checks the header order (name, Export, then Reset on the right) in all four panels, that no button says Fit, the ribbon groups and sidebar tabs of ED, the save-only structure-file menu, the image-only menus, the ED structure PNG/SVG, the CSV buttons, and the legend size. 99 browser tests, 536 unit tests pass.
 
 ---
+
+#### Several open CIFs (2026-10-27, asked by the user, in place of M13/M14)
+
+- The Open CIF bar takes several files at once (button with `multiple`, or drop). After the button and the drop hint comes a vertical divider, then **one card per open file**: its chemical name (`_chemical_name_mineral`, else `_common`, else `_systematic`; the Hill formula when the CIF has none) and its space group, and a **×** to close it. The file name and formula are in the card's tooltip. Opened files are added after the existing cards; the last one opened is shown.
+- Clicking a card shows that structure in all three tabs (each tab starts fresh for it, as when a file is opened: view settings are not kept per card). Closing the shown card shows its right neighbour (else the left one); closing the last leaves the empty page.
+- More than **10** open structures bring a warning (each is kept in memory and switching rebuilds every view); more than **40** are refused with a message (files beyond 40 are not opened). A file that is not a CIF is reported by name and gets no card; the others still open. A file with several data blocks keeps its chooser, for the shown card.
+- `chemicalName` is a new field of `CifStructure` and `Crystal`, separate from `title` (which prefers `_publ_section_title`); the CIF writer writes it as `_chemical_name_common`, so files round-trip.
+- Tests: `multi.spec.ts` (4 browser tests: cards and order, divider position, switching tabs between cards, closing, bad file, the 10/40 limits) and a parser unit test; 103 browser tests and 537 unit tests pass.
 
 ### M13: COD search + CORS proxy  *(3–5 d)*
 **Goal:** find and load structures without leaving the app.

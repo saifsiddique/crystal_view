@@ -348,6 +348,19 @@ _cod_database_code 1234567
     expect(s.title).toBe('A study of sodium');
     expect(s.formula).toBe('Na1');
     expect(s.ids).toEqual({ cod: '1234567' });
+    expect(s.chemicalName).toBeUndefined();
+  });
+
+  it('keeps the chemical name apart from the title: mineral, then common, then systematic', () => {
+    const s = parseFirstStructure(`${MINIMAL}_publ_section_title 'A study'
+_chemical_name_systematic 'Sodium chloride'
+_chemical_name_mineral Halite
+`).structure;
+    expect(s.title).toBe('A study');
+    expect(s.chemicalName).toBe('Halite');
+    const t = parseFirstStructure(`${MINIMAL}_chemical_name_systematic 'Sodium chloride'
+`).structure;
+    expect(t.chemicalName).toBe('Sodium chloride');
   });
 
   it('warns when the declared volume disagrees with the cell', () => {

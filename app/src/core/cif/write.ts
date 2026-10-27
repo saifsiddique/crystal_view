@@ -47,6 +47,7 @@ export function writeCif(s: CifStructure): string {
   out.push(`data_${s.name.replace(/\s+/g, '_') || 'structure'}`);
   line('_audit_creation_method', cifString('Crystal Viewer Lite'));
   if (s.title) line('_publ_section_title', cifString(s.title));
+  if (s.chemicalName) line('_chemical_name_common', cifString(s.chemicalName));
   if (s.formula) line('_chemical_formula_sum', cifString(s.formula));
   if (s.ids.cod) line('_cod_database_code', cifString(s.ids.cod));
   if (s.ids.icsd) line('_database_code_icsd', cifString(s.ids.icsd));
