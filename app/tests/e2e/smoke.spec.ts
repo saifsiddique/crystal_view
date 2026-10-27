@@ -5,8 +5,8 @@ test('app shell loads and the Rust/WASM kernel answers through the worker', asyn
   page.on('pageerror', (e) => errors.push(e.message));
 
   await page.goto('/');
-  await expect(page).toHaveTitle('CrystalLens');
-  await expect(page.getByRole('heading', { name: 'CrystalLens', level: 1 })).toBeVisible();
+  await expect(page).toHaveTitle('Crystal Viewer Lite');
+  await expect(page.getByRole('heading', { name: 'Crystal Viewer Lite', level: 1 })).toBeVisible();
 
   await expect(page.getByTestId('worker-status')).toHaveText('running');
   await expect(page.getByTestId('kernel-status')).toHaveText(/^kernel v\d+\.\d+\.\d+$/);
@@ -27,6 +27,4 @@ test('core inspector loads a CIF and reports the crystal', async ({ page }) => {
   await expect(page.getByTestId('space-group').locator('.bar')).toHaveText('3');
   await expect(page.getByTestId('lattice-vectors')).toContainText('Cubic');
   await expect(page.getByTestId('detected')).toContainText('matches the CIF');
-
-  await expect(page.getByTestId('scattering')).toContainText('Iron');
 });

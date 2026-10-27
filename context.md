@@ -1,4 +1,4 @@
-# context.md: CrystalLens (working name)
+# context.md: Crystal Viewer Lite (code name CrystalLens)
 
 > A faster, more convenient CrystalMaker-style tool. It shows crystal structures in 3D and simulates
 > electron diffraction (kinematic and dynamical, with Kikuchi and HOLZ) and powder X-ray diffraction
@@ -25,11 +25,11 @@
 | M5 | 3D structure renderer | M3 | ✅ done 2026-10-24 (see §7.M5) |
 | M6 | View range, bonds, styles & colours | M5 | ✅ done 2026-10-26 (see §7.M6) |
 | M7 | Orientation control (mouse ↔ [uvw]/(hkl)) | M5, M1 | ✅ done 2026-10-26 (see §7.M7) |
-| M8 | Kinematic electron diffraction (indexed) | M3, M4, M7 | ☐ |
-| M9 | Powder XRD | M3, M4 | ☐ |
-| M10 | Kikuchi lines & HOLZ (geometric) | M8 | ☐ |
-| M11 | Dynamical diffraction (Bloch wave, WASM) | M8, M10 | ☐ |
-| M12 | Export (PNG / SVG / CSV / CIF / session) | M6, M8, M9 | ☐ |
+| M8 | Kinematic electron diffraction (indexed) | M3, M4, M7 | ✅ done 2026-10-26 (see §7.M8) |
+| M9 | Powder XRD | M3, M4 | ✅ done 2026-10-26 (see §7.M9) |
+| M10 | Kikuchi lines & HOLZ (geometric) | M8 | ✅ done 2026-10-26 (see §7.M10) |
+| M11 | Dynamical diffraction (Bloch wave, WASM) | M8, M10 | ✅ reduced scope done 2026-10-27: spot pattern on request, no thickness series or CBED (see §7.M11) |
+| M12 | Export (PNG / SVG / CSV / CIF / session) | M6, M8, M9 | ✅ reduced scope done 2026-10-27, no session file (see §7.M12) |
 | M13 | COD search + CORS proxy | M2 | ☐ |
 | M14 | App shell, menus, panels, PWA | M0 (grows with all) | ☐ |
 | M15 | Performance audit & desktop escape hatch | all | ☐ |
@@ -148,10 +148,10 @@ strFac_app/
           electron.ts      (kinematic ED)                                        M8
           powder.ts        (PXRD)                                                M9
           kikuchi.ts, holz.ts                                                    M10
-          dynamical.ts     (TS wrapper around WASM kernel)                       M11
+          dynamical.ts     (Bloch wave; eigen-solver in core/math/hermitian.ts) M11
       render/              ← three.js scene, picking, camera ↔ orientation     M5–M7
       plots/               ← SVG ED/Kikuchi/CBED renderers, Plotly PXRD          M8–M11
-      export/              ← png.ts, svg3d.ts, csv.ts, session.ts                 M12
+      export/              ← png.ts, svg3d.ts, csv.ts, xyz.ts, browser.ts, rows.ts M12 (no session.ts)
       io/                  ← fileOpen.ts, cod.ts                                  M13
       workers/             ← compute.worker.ts (comlink)                         M8+
       state/               ← Svelte stores: crystal, view, settings              M14
@@ -693,6 +693,43 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - Tilting by a few mrad visibly changes spot intensities.
 - Recompute takes < 50 ms for g_max = 2 Å⁻¹.
 
+**Added by the user for this module (2026-10-26):**
+1. Default voltage **300 kV**, with presets **120 kV** and **60 kV**.
+2. A tab of its own: the page has two tabs, **Structure Viewer** and **Electron Diffraction**.
+3. The tab shows two square panels side by side: on the left a simplified structure viewer (rotate, zoom, pan, range only), on the right the kinematic pattern of what the left panel projects. Rotating the structure updates the pattern in real time; typing a zone axis [uvw] turns both.
+4. The pattern zooms in and out. Only the zero-order Laue zone by default; higher-order Laue zones are an option.
+
+#### M8 status: ✅ done 2026-10-26
+
+**Acceptance results:** 35 tests in `electron.test.ts`, 10 in `edplot.test.ts` (427 unit tests overall), 10 browser tests in `m8.spec.ts` (50 overall).
+- **ZOLZ spot sets** for all 7 fixtures at [001] and [110] equal `tem.zones` exactly, d to 1e-6, and the forbidden flags match pymatgen's zeros.
+- **Intensities vs pymatgen:** compared only for the ordered structures, normalised to the strongest spot. Worst differences: NaCl 0.005, Si 0.009, graphite 0.0005, rutile 0.004, ZrO₂ 0.074 (weak reflections where Zr and O nearly cancel). **pymatgen's `TEMCalculator` ignores site occupancies** (it sums every species at full weight; read from its source), so olivine (Mg/Fe) and albite (Al/Si) differ by up to 190% and are not compared there.
+- **Strict check instead:** `scripts/make_ed_reference.py` (env s-em) writes `tests/fixtures/ed/lobato_reference.json`: F² for every |h|,|k|,|l| ≤ 3 of every fixture, from pymatgen's own CIF expansion, **abTEM's Lobato evaluator** (`scattering_factor(q²)`, q = 1/d) and occupancies, no DW. Our F² agree to 5e-6 of the strongest reflection for all seven (residue from pymatgen snapping 0.3333 to 1/3); tolerance 2e-5.
+- Si [110]: (002) forbidden, (1 −1 1) strongest. Tilting 5 mrad changes more than 4 spot intensities by > 20% (unit test), and a 0.3° arrow-key tilt does in the browser.
+- **Speed:** albite (largest fixture cell), g_max = 2: recompute 4–7 ms with cached structure factors; the first pattern of a crystal costs ~70 ms (structure factors plus the intensity reference). Runs on the main thread, on every drawn frame.
+- Mutation-checked: dropping occupancy, flipping screen-right, the DW sign, transposing hR, flipping the sign of s, and removing the symmetry-absence test each fail tests.
+
+**Built:**
+- `core/diffraction/electron.ts` (pure): `electronWavelength(kV)` (CODATA constants; 300 kV 0.0196875, 120 kV 0.0334922, 60 kV 0.0486606 Å), `relativisticGamma`, `electronStructureFactor(crystal, hkl, {debyeWaller})` → [re, im] in Å, `excitationError`, `shapeFactor(profile, t, s)`, `kinematicPattern(crystal, geometry) → {spots, lambda, zoneAxis, beam, right, up, evaluated}`. `Spot = {hkl, x, y, g, d, F, I, s, zone, forbidden}`.
+  - Beam = the left view's line of sight; spots at x = g·right, y = g·up with right = beam × up, i.e. **the pattern is in the same orientation as the projection** (no microscope image rotation, no 180°).
+  - Laue zones are counted against an integer zone axis (`zone` = hu+kv+lw); only |n| ≤ `maxZone` are enumerated, by solving the zone equation for the largest index of [uvw] (a 2D loop per layer, not a 3D box).
+  - Structure factors use neutral-atom Lobato f_e, occupancy and isotropic DW (U_iso, or U_eq from the U_ij), cached per crystal by hkl (WeakMap). Intensity 1 = the strongest |F|² with |g| ≤ 1 Å⁻¹ (independent of orientation, so tilting dims spots instead of renormalising).
+  - **Forbidden** = a space-group operation with hR = h and non-integer h·t (exact), or |F| < 1e-4 of the in-phase bound (site-specific absences such as Si 222 and graphite 3 −3 1). The numeric threshold cannot be larger: albite's real (−3 3 3) is at 1e-3.
+  - Profiles: `smooth` = 1/(1 + (π t s)²) (sinc² without its zeros; default), `sinc` (thin slab), `none` (zone-axis |F|², what pymatgen does).
+- `state/settings.ts`: `EDSettings` (voltage, thickness, profile, debyeWaller, maxZone, gMax, intensityScale, exposure, labels, showForbidden, cameraLength, zoneAxis, tiltStep, range), `defaultEDSettings`, `parseEDSettings` (for M12), `VOLTAGE_PRESETS = [300, 120, 60]`.
+- `plots/edPlot.ts`: spot radius (area ∝ scaled intensity × exposure; specks under 0.6 px are not drawn), `niceLength` for the scale bar, greedy non-overlapping `placeLabels`, `measureSpots` (|g₁|, |g₂|, d, ratio, angle), `detectorRadius = λ L g`, overlined negative indices.
+- `ui/DiffractionTab.svelte` + `ui/EDPattern.svelte`. Toolbar: Beam (presets, kV, λ), Zone axis ([uvw] Go; **From Structure Viewer** copies tab 1's orientation; tilt step), Specimen (t, profile, DW), Pattern (Laue zones from ZOLZ to |n| ≤ 6, scale linear/√/log, **exposure ×1–×10⁴**, labels none/low-index/all, Forbidden, Measure, camera length), Structure range (1/2/3 cells, ±1 cell, min/max per axis). Left: `StructureView` with the new `setPicking(false)`; arrow keys tilt by the step (default 1°; Shift a tenth, Ctrl ×5; Alt rolls). Right: SVG on black; wheel zoom about the pointer, drag to pan, double-click or Fit, hover tooltip (hkl, d, |g|, |F|, I, s_g, zone), scale bar in Å⁻¹ and mm. Spots are computed out to the panel's farthest corner (≤ 8 Å⁻¹), so zooming out shows more.
+- `App.svelte`: ARIA tabs (`tab-structure`, `tab-ed`; arrow keys switch). A tab is mounted when first opened and then kept hidden, so both 3D views keep their state. The Viewer's `settings` is now `$bindable`, owned by App and passed to the ED tab: **colours, radii, style, bond rules, background, cell and axes are shared**; the range and orientation belong to each tab. The Viewer's "Structure viewer" heading is gone (the tab names it).
+- Test hook `window.__crystallensED` (`pattern`, `reading`, `spotClient`, `pxPerInvA`, `drawn`, `computeMs`, ...), typed in `tests/e2e/hook.d.ts`. `layout.spec.ts` now scopes its tab-panel locator to the side panel (the page has tab panels too).
+
+**Decisions and deviations from the plan above:**
+1. **Default thickness 100 Å, not 500.** At 300 kV and 500 Å the excitation error wipes out nearly every ZOLZ spot beyond 2 2 0 on the zone axis (Lorentzian P ≈ 0.05 at 220). Kinematic theory only holds well below the extinction distance anyway.
+2. **Laue-zone reference axis:** the nearest zone axis with |index| ≤ 3 (or the typed axis when that is nearer), not the M7 readout's ≤ 6. With 6, a crystal 4° off [001] reads as [−1 0 6] and "ZOLZ only" drops the [001] Laue-circle spots a microscope shows.
+3. **HOLZ are kinematically faint:** Si FOLZ ring spots are ~1e-4 of the strongest reflection, about the same as the off-sphere HOLZ tails near the centre at t = 100 Å. Nothing is faked: the **exposure** control (a saturating gain, like a longer exposure) and a larger thickness make the ring stand out (Si [111], t = 1000 Å, ×1000 shows it at 3.3 Å⁻¹). On the axis, only the layer the Ewald sphere bends towards (g·beam < 0) is excited.
+4. Tilt is done by rotating the left view (mouse, arrow keys), not with θx/θy fields; the readout shows the deviation in degrees and mrad.
+5. Main thread, not a worker: per-frame cost is a few ms after the first pattern, and the pattern must follow the drag frame by frame.
+6. **Not done:** the experimental-image overlay (optional in the plan) and anisotropic DW (U_eq is used instead). The ED tab's settings are not saved yet (M12).
+
 ---
 
 ### M9: Powder XRD  *(5–7 d)*
@@ -719,6 +756,35 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 
 **Accept when:** using the fixture's `pxrd.wavelength` (1.54184 Å, pymatgen's `CuKa`) and without Kα2 or Debye–Waller, peak positions match the fixture's `pxrd.peaks` to 0.01° 2θ, relative intensities are within 3% (different f-table), and the multiplicities are exact after merging peaks at the same 2θ the way pymatgen does (`m` = number of ± hkl members merged into the peak; §7.M0, finding 4).
 
+**Changes asked for by the user (2026-10-26):** a **separate tab "Powder XRD"** (like Electron Diffraction); the "largest d-spacings" list and the "scattering factors" lookup **move out of the Structure Viewer tab** into it (the d-list is superseded by the peak table, the lookup becomes a card under it); **no experimental-data overlay and no multi-phase** (both dropped from the plan, not postponed).
+
+#### M9 status: ✅ done 2026-10-26
+
+**Acceptance results:** 29 tests in `powder.test.ts`, 15 in `pxrdplot.test.ts` (487 unit tests overall), 17 in `m9.spec.ts` (75 browser tests overall); lint, format, types and Rust clean.
+- **Against the pymatgen fixtures (all 7, Cu Kα 1.54184 Å, no Kα₂, no DW, 10-90°):** the number of merged peaks is identical, positions agree to ≤ 5e-9° (the fixture is rounded to 10 digits), d to 1e-6, multiplicities exactly (summed over merged members as pymatgen does). Intensities: **the plan's 3% is met**; the worst difference for any peak above 1% is 0.58 on the 0-100 scale (ZrO₂ 220: 24.2 against 23.6; Si 220: 67.1 against 66.6). M4's warning that pymatgen's X-ray table would cost up to 10% did not materialise at these angles. The test allows `0.03 × max(I, 20)`.
+- **Multiplicities** from the point group and Friedel pairs are checked for cubic (111 → 8, 200 → 6, 220 → 12, 311 → 24, 321 → 48), tetragonal, hexagonal axes (100 → 6, 101 → 12), monoclinic, triclinic and orthorhombic. A **non-centrosymmetric** case (zinc blende, F-43m) is tested separately: the point group alone gives 4 for (111) and 24 for (321), Friedel's law doubles them. (This case is what makes the "remove Friedel" mutant fail; all seven fixtures are centrosymmetric.)
+- **Neutrons:** NaCl |F(111)| = 4|b_Na − b_Cl| and |F(200)| = 4(b_Na + b_Cl) exactly, and |F(400)| = |F(200)| (no form-factor fall-off).
+- **Speed:** albite (largest fixture), 5-90°, 0.02° step, with Kα₂ and the CIF's U: median peaks + profile under 200 ms in the unit test; a few ms for the small cells.
+- Mutation-checked: no Friedel, un-transposed R, no occupancy, no LP, DW sign, Scherrer without cos θ, Kα₂ ratio ignored each fail tests.
+
+**Built:**
+- `core/diffraction/powder.ts` (pure): `powderPeaks(crystal, params)` → classes `{hkl (largest member), m, d, twoTheta, F, I, raw}`, `mergePeaks` (peaks at the same 2θ, tol 1e-5° as pymatgen), `equivalentReflections`, `lorentzPolarisation` (X-ray with monochromator angle 2θ_m, neutron Lorentz only), `marchDollase`, `powderProfile(peaks, profileParams)` (area-normalised pseudo-Voigt per peak, Kα₂ copy at its own wavelength with ratio × LP₂/LP₁, scaled so the highest point is 100), `fwhm` (Caglioti + Scherrer K = 0.9 + 4ε tanθ), `pseudoVoigt`, `braggTwoTheta`, `PowderError`. Scale: 100 = the strongest merged peak; classes below `minPercent` of it are dropped.
+- **Class enumeration:** every hkl in the d ≥ λ/(2 sin θ_max) sphere with h > 0 (or h = 0, k > 0, or h = k = 0, l > 0); its orbit under h → hR for the rotations of `Crystal.rotations` plus −h; only the lexicographically largest member is worked on. March-Dollase averages P over every member (so m·P without PO is just m).
+- **Structure factor:** Σ occ · f(s) · T exp(2πi h·x) over the de-duplicated atoms; f = Waasmaier-Kirfel `fx` (optionally the ion's own via the site's type symbol, falling back to the neutral atom) or `bn` (isotopes D/T from the site). The Debye-Waller handling is the shared `Thermal` type (below).
+- `core/radiation.ts`: `XRAY_DOUBLETS` (Kα₁ Hölzer 1997, Kα₂ from the standard tables; they differ by < 1e-4 Å from other sources) and `KALPHA_RATIO = 0.5`.
+- `state/settings.ts`: `PXRDSettings` (radiation: Cu/Co/Mo/Cr/Fe/Ag Kα, other X-ray λ, neutron; Kα₂ and its ratio; 2θ range and step; U, V, W, η; size (nm) and microstrain (%); zero shift; monochromator 2θ_m; March-Dollase hkl and r; Debye-Waller + B box; ionic factors; axis 2θ/d/Q; √ scale; labels; minimum peak %), `defaultPXRDSettings` (Cu Kα₁ only, 5-90°, step 0.02°), `parsePXRDSettings`.
+- `plots/pxrdPlot.ts`: axis maps (`u` = 2θ, Q = 4π sinθ/λ, or −d so that every axis grows to the right), `niceTicks`, `thinLabels`, `peaksToCsv`.
+- UI: `ui/PowderTab.svelte`, `ui/PxrdPlot.svelte` (custom SVG: wheel zoom about the pointer, drag pan, double-click Fit, ticks under the pattern, hkl labels on the strongest peaks, hover tooltip, click selects), `ui/ScatteringLookup.svelte` (moved from `Inspector.svelte`). Peak table: (hkl), m, d, 2θ, |F|, I, **sortable on every column** (the first click on a numeric column puts the largest first), row click selects the peak on the plot, **Export CSV** (`<crystal name>_peaks.csv`). `Inspector.svelte` lost the "Largest d-spacings" and "Scattering factors" cards and their code (the [uvw]/(hkl) calculator stays).
+- Test hook `window.__crystallensXRD`.
+
+**Decisions and deviations:**
+1. **Custom SVG, not Plotly** (§3 said Plotly for PXRD): no 3 MB dependency, no new package to audit, and the SVG export M12 needs comes for free. The plot has what M9 lists (sticks labelled with hkl, 2θ/d/Q toggle); it does not have Plotly's box-zoom or legend.
+2. **Default is Cu Kα₁ alone** (the earlier decision in M5's notes), Kα₂ is a checkbox.
+3. Peak-table rows are symmetry classes. Classes at the same 2θ (accidental overlaps such as (333)/(511)) are separate rows but one tick, one label ("333 / 511") and one summed height on the plot; the I scale uses the merged maximum.
+4. **Debye-Waller factor** (also changed in the ED tab on the same request): written in full, with a **B box that starts at the CIF's mean B** (occupancy-weighted 8π²U over atoms that have a U; "CIF has none" and 0 when it has none) and a "use CIF" button once overridden. A typed B is one uniform value for every atom; unticked means no vibration; the default (null) is each atom's own U (U_iso, or U_eq of the U_ij) as before. The core type is `Thermal = boolean | number` (`false` none, `true` per-atom, a number a uniform B), shared by ED, Kikuchi and powder code; `meanB(crystal)` and `atomicU(crystal)` are exported from `core/diffraction/electron.ts`.
+5. **Kikuchi band count** is a setting in the ED tab (default 20, 1-300; was a fixed 90). The faint fill of the bands was reduced, too.
+6. Not done: anomalous scattering (f′, f″), anisotropic DW (U_eq is used), background and a polynomial/rolling-ball subtraction (only needed with experimental data), absorption/Lorentz-Polarisation corrections for Debye-Scherrer geometry or capillaries, and the experimental overlay and multi-phase mixtures (dropped by the user).
+
 ---
 
 ### M10: Kikuchi lines & HOLZ (geometric)  *(4–6 d)*
@@ -743,6 +809,31 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 - The HOLZ-line pattern in Si [111] at 200 kV has the correct 3-fold symmetry. Compare against a literature figure.
 - Updates take < 50 ms while dragging.
 
+**Added by the user for this module (2026-10-26, with the M8 follow-ups):** the features live in the **Electron Diffraction tab** (overlays on the pattern, not a separate tab). Before it: **white viewers** (every viewer's default background is #ffffff; the diffraction spots became dark colours) and the **rename to "Crystal Viewer Lite"** (Lite in superscript; the code name CrystalLens stays in identifiers, `window.__crystallens`, localStorage keys and the npm package).
+
+#### M10 status: ✅ done 2026-10-26
+
+**Acceptance results:** 16 tests in `kikuchi.test.ts` (443 unit tests overall), 8 in `m10.spec.ts` (58 browser tests overall); lint, format, types, Rust all clean.
+- **Band width = 2θ_B:** on a zone axis each Kikuchi pair is symmetric (D = ∓|g|/2) and (D₂ − D₁)·λ equals 2·asin(λ|g|/2) to 1e-3 relative.
+- **Exact check without the small-angle approximation:** for a tilted beam, every crystal direction u lying in a plane projects (gnomonic, P = k u⊥/(u·beam)) onto the centre line of that plane's band to 1e-8; and a point on a line has |s_g| < 1e-3 1/Å when evaluated with the exact `excitationError`.
+- **Si [111] FOLZ radius** = sqrt(2kH − H²) with H = 1/(a√3) (3.2846 1/Å at 300 kV, 66 mrad), within 0.2% of the textbook sqrt(2H/λ); the HOLZ-line distance is D = (G² − |g⊥|²)/(2|g⊥|), so a line crosses the disc centre exactly where |g⊥| = G.
+- **Three-fold symmetry** of the Si [111] HOLZ lines: rotating the (angle, D, I) set by 120° reproduces it, and 60° does not. (I did not compare against a literature figure or JEMS; that part of the acceptance line is not checked.)
+- **Centring is accounted for:** Si [110] has no first-order ring (h + k = 1 forces mixed parity) but a second-order one; Si [111] has n = 1 and 3 but not 2; Si [001] has all three.
+- **Speed (albite, the largest fixture):** per-frame Kikuchi (90 bands) and HOLZ lines + rings are a few ms with cached structure factors; the first call per crystal fills a cache (about 0.1–0.3 s). The unit test asserts the median frame < 50 ms and the worst < 200 ms (a pure-maximum assertion was flaky under load).
+
+**Built:**
+- `core/diffraction/kikuchi.ts` (pure): `kikuchiBands`, `laueRings`, `holzLines`, `discRadius`, `approximateRingRadius`, `Strain`/`NO_STRAIN`. One equation serves all three: a reflection g is on the Bragg condition where τ·ĝ⊥ = −(g² + 2k g_z)/(2|g⊥|) (τ: tilt, or screen position, in the detector plane, units 1/Å; straight lines, linearised). A Kikuchi band is the pair from +g and −g (D₊ = −(g² + 2kg_z)/(2|g⊥|), D₋ = (g² − 2kg_z)/(2|g⊥|)). Rings are the exact intersection of the Ewald sphere with the layer plane g·r̂ = ±n/|r| (centre moves with the tilt). HOLZ lines: reflections of Laue zones ±1..±2 with |D| < α/λ, weighted by relative intensity (cut-off 3e-4 in the UI).
+- `core/diffraction/electron.ts` gained `detectorFrame`, `reducedZoneAxis`, `forEachLaue` (the layer enumeration of `kinematicPattern`, now shared) and `reflectionStrength` (|F|, relative I and the forbidden flag, cached per hkl).
+- **Strain** (a, b, c in per cent, ±5): B' = B·diag(1/(1+ε)), applied to the Kikuchi lines, rings and HOLZ lines only, **not** to the spots or intensities (so the pattern itself does not move; HOLZ geometry does, which is what makes it a strain probe).
+- UI (`ui/DiffractionTab.svelte`, `ui/EDPattern.svelte`): toolbar group **Kikuchi / HOLZ**: Kikuchi, HOLZ rings, CBED disc, α (mrad, default 15), strain a/b/c. The pattern header has **Pan | Tilt**: in Tilt mode a drag turns the crystal so that the pattern (lines, rings) follows the pointer by exactly the dragged distance (angle = Δ·λ), with the zone-axis readout updating; in Pan mode it moves the view. Rings are drawn only for layers that hold an allowed reflection, labelled FOLZ/SOLZ/n with the radius in 1/Å. The CBED disc is the circle of radius α/λ centred on the transmitted beam with the HOLZ lines clipped to it (zoom into the pattern to see it large). Kikuchi bands are drawn as line pairs with a faint fill, strongest 90, the strongest 10 labelled at the band centre.
+- Test hook `window.__crystallensED.overlay()` (counts, rings, disc radius, ms).
+
+**Decisions:**
+1. **Drag-to-tilt sign is opposite to the arrow keys.** Turning the crystal right moves its near atoms right, but the zone axis points into the screen, so its image moves left. The first version had the wrong sign (the browser test caught it: the ring moved the right distance in the wrong direction).
+2. **The Kikuchi pattern is limited to |g| <= 2.5 1/Å and the 90 strongest bands** (default 400 internally), so zooming out does not trigger a huge structure-factor job; bands from planes with d < 0.4 Å are not drawn.
+3. The CBED disc is an overlay on the spot pattern, not a separate view; there are no dynamical intensities in it (that is M11).
+4. **White viewers:** `DEFAULT_BACKGROUND` is `#ffffff` for the Structure Viewer, the left panel and the pattern; pattern colours are dark (zero-order spots #111827, HOLZ layers blue/magenta/green, forbidden amber, Kikuchi violet, rings teal, HOLZ lines red).
+
 ---
 
 ### M11: Dynamical diffraction (Bloch wave, WASM)  *(10–15 d)*
@@ -765,6 +856,49 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
    - Overlay the M10 geometric HOLZ lines for comparison.
 4. **Stretch goal, likely desktop-only:** a dynamical Kikuchi/EBSD master pattern. It needs Bloch waves on a stereographic grid of 10⁴–10⁵ directions, so leave it behind the M15 trigger.
 
+**Assessment 2026-10-26 (asked by the user: is M11 fast enough for live update? If not, skip): not fast enough, so M11 is skipped for now.** These are estimates from operation counts, **not measurements** (no Rust eigen-solver exists in `kernels/` yet).
+- A Hermitian N×N eigen-decomposition with eigenvectors costs roughly 20-30 N³ real flops. At a realistic 0.5-1 Gflop/s for `nalgebra` compiled to WASM that is about 5 ms at N = 50, 25-50 ms at N = 100, 100-400 ms at N = 150-200. Tilting the beam changes the diagonal (2K s_g), so **every orientation needs a new solve**; nothing can be reused as in the thickness series.
+- So live dynamical spot intensities (one zone axis, one tilt per frame, at most about 60-80 beams, in a worker) might just fit the 50 ms budget; with the 150-300 beams the module plans for (which a thick or heavy crystal needs) they do not.
+- CBED is 2,304 solves for 48×48 directions: 2,304 × 50-170 ms ≈ 2-6 min single-threaded, 20-60 s on 7 workers; the 20 s budget is missed above about 100 beams, and a drag-live CBED is out of the question. A dynamical Kikuchi map (10⁴-10⁵ directions) is beyond the browser, as §2 already says.
+- Geometric M10 covers the live cases (bands, rings, HOLZ lines move correctly with tilt, and cost a few ms). What M11 would add is intensities, which only matter in thick crystals (here > ~100 Å), where the kinematic pattern is no longer a good description.
+- **If it is revived:** do it as a *release* feature (solve when the drag stops, show the kinematic pattern while dragging), start with the thickness series and the zone-axis spot pattern at 50-100 beams, and write the eigen-solver benchmark first, before any UI, to replace these estimates with numbers.
+
+**Revived 2026-10-27 with a reduced scope (asked by the user).** Only the dynamical **spot pattern**, computed **on request**: the ED tab is unchanged except for a "Calculate dynamical diffraction" button. The user turns the crystal with the kinematic pattern; the button replaces the intensities by Bloch-wave ones for that orientation; a small indicator by the button shows while it runs. Trying to move the crystal afterwards gives a warning first, and continuing goes back to kinematic intensities. **No thickness series, no CBED, no dynamical Kikuchi or HOLZ** (the decision on Kikuchi/HOLZ was left to us: the M10 overlays stay drawn as they are, since they are geometry and the orientation is fixed; dynamical Kikuchi or HOLZ intensities would need CBED-like sampling, which is out of this scope).
+
+#### M11 status: ✅ reduced scope done 2026-10-27
+
+**Measured (replaces the estimates above):** Si [110], 200 kV, absorption on, Node on the dev laptop: 50 beams 21 ms, 100 beams 73 ms, 150 beams 0.19 s, **200 beams 0.41 s** (target < 1 s met), 300 beams 1.4 s, 400 beams 4.9 s (about 4 s in Chromium). Building the matrix is 10-50 ms; re-evaluating a thickness is < 1 ms. Si [110] intensities change by < 10% from 150 to 400 beams (000: 0.108 against 0.111; 002: 0.090 against 0.084 at 500 Å).
+
+**Acceptance results:** 21 tests in `dynamical.test.ts` (508 unit tests overall), 5 in `m11.spec.ts` (80 browser tests overall); lint, format, types and Rust clean.
+- **Two-beam limit:** with the matrix built from the crystal (Si 2 2 0 put exactly on the Ewald sphere, beams = 2), I_g(t) = sin²(πt/ξ_g), ξ_g = 1/(λ|U_g|), to 1%, and off the Bragg angle (s = 7.8e-4 1/Å, comparable to 1/ξ) the textbook sin²(πt s_eff)/(ξ s_eff)² to 1%. With hand-made 2 × 2 matrices it agrees to 1e-9.
+- **Extinction distances** of Si at 100 kV (no DW): 617, 762, 1241 Å for 111, 220, 400 against 602, 757, 1268 in the tables (Hirsch et al.; Williams & Carter): within 2.5% (the f_e parametrisations differ). Tested to 4%.
+- **Si [110] at 200 kV:** the kinematically forbidden 002 reaches > 1% of the incident beam (double diffraction); it is ~5e-4 at 300 kV, 100 Å (the browser test).
+- Without absorption Σ I_g = 1 to 1e-9 at every thickness; with absorption the total falls monotonically, and every q > 0. At the exact Si [001] zone axis the four 2 2 0 beams agree to 1e-8 (with and without absorption); the answer does not depend on the order of the beams; a thin crystal (3 Å) gives the kinematic I_g = (πtλ|U_g|)² to 2%. An exact three-beam case checks absorption inside a degenerate eigenvalue group (I_1 = e^{−2ap} sinh²(ar)).
+- The eigen-solver: residual and orthonormality ~1e-14 for random complex Hermitian matrices, also with degenerate eigenvalues.
+- Mutation-checked: diagonal K s instead of 2K s, no γ in U_g, no conjugate on C_0, wrong sign in the real embedding, no removal of the (v, iv) partner, no mean absorption, keeping the centring absences, q without the degenerate diagonalisation each fail tests. (Flipping the sign of the upper triangle of Im A survives: only the lower triangle is read.)
+- "Si [110] CBED vs JEMS" and the 48 × 48 CBED timing are out of this scope.
+
+**Built:**
+- `core/math/hermitian.ts`: `hermitianEigen(re, im, n)`. H = Re + i Im is solved as the real symmetric [[Re, −Im], [Im, Re]] of size 2n (Householder tridiagonalisation + implicit QL, the EISPACK tred2/tql2 pair as in JAMA, column-major so the inner loops are contiguous); every eigenvalue appears twice, and Gram-Schmidt in each group of equal eigenvalues keeps one complex vector of every (v, iv) pair, which also handles real degeneracies. `symmetricEigen` is exported too.
+- `core/diffraction/dynamical.ts`:
+  - `blochProblem(crystal, geometry)` (main thread): beams = 000 + the reflections of the shown Laue zones with |g| ≤ 4 1/Å and |s_g| ≤ 0.2 1/Å, nearest the Ewald sphere first (ties by |g| and hkl). Lattice-centring absences (a pure translation of the space group gives a non-integer h·t) are skipped, since all their couplings are zero; other forbidden reflections (Si 002) are kept. A_gg = 2K s_g (the M8 excitation error), A_gh = U_{g−h}, U_g = γ F_e(g)/(πV) with the M8 F_e (occupancy, Debye-Waller factor as set). Absorption is the proportional model U′_g = κ U_g, U′_0 = κ U_0 on the diagonal.
+  - `solveBloch(matrices)` (pure numbers, runs in the worker): eigen-decomposition; then A′ is diagonalised inside each degenerate group, and q_j = C_j† A′ C_j / 2K.
+  - `beamIntensities(solution, t)`: I_g = |Σ_j C_0^(j)* C_g^(j) e^{2πiγ_j t} e^{−2πq_j t}|².
+  - `dynamicalPattern(problem, I)`: the M8 `Pattern`, with I relative to the strongest diffracted beam (so the drawing scale, exposure and labels work unchanged); each spot carries `fraction` (of the incident beam) and `kinematicallyForbidden`.
+  - `extinctionDistance`.
+- `workers/compute.worker.ts`: `bloch(matrices)`, returning the arrays as transferables.
+- UI (`ui/DiffractionTab.svelte`): a "Dynamical" toolbar group with **Calculate dynamical diffraction**, a spinner and "solving N beams…" while the worker runs, then "N beams · x s" and a **Kinematic** button. **beams** (default 150, 2-400) and **κ** (default 0.1) boxes. Caption "Dynamical · N beams · t · [uvw] · kV", and a line showing 000, the strongest beam and the absorbed fraction, each as a percentage of the incident beam. The **thickness box re-evaluates the dynamical intensities live** (exponentials only). Hover shows "I … % of incident" and "kinematically forbidden"; with Forbidden ticked, those beams get an orange ring.
+- **Orientation lock:** with a dynamical pattern shown, every move asks first: arrow keys, Go, From Structure Viewer, a left-drag on the structure (stopped in the capture phase, before the trackball sees it), and a drag on the pattern in Tilt mode. "Keep dynamical" (or Esc) cancels; "Switch to kinematic" drops the dynamical intensities and makes the move (a stopped drag is not replayed). Zoom, pan (right-drag on the structure, Pan mode on the pattern) and the range are not moves. A changed voltage, Debye-Waller setting, Laue zones, beams or κ goes back to kinematic with a note (they would need a new solve); a new crystal does too. A result that arrives after the crystal or a setting changed is dropped.
+- Test hook `window.__crystallensED.dynamic()`.
+
+**Decisions and deviations:**
+1. **The eigen-solver is TypeScript, not Rust/WASM + nalgebra** as planned. It meets the plan's 200-beam < 1 s target. The kernel crate and `wasm-pack` are in the `crystallens` conda env, so a WASM solver can replace `solveBloch` behind the same worker call if CBED (thousands of solves) is ever done.
+2. One solve per click, in the existing worker; no worker pool, no cancel button (a stale result is dropped instead). 400 beams take ~4-5 s.
+3. Normal incidence: the surface normal is along the beam. The eigenvalue equation is linear in γ (high-energy approximation); U_0 (mean inner potential) is left out of A, since it does not change intensities.
+4. Absorption is the proportional model (U′ = κU, the mean absorption included). It overestimates the overall loss (77% at 500 Å, κ = 0.1, Si [110], 300 kV), since the true absorptive potential comes from large-angle TDS and is not proportional to f_e. Spot ratios are unaffected by the mean part; κ is user-settable (0-1).
+5. Beam selection is by |s_g| alone (no Bethe-potential perturbation of weak beams).
+6. Not done (outside the scope agreed): thickness series plot, CBED and rocking curves, dynamical HOLZ/Kikuchi, live dynamical update while turning, worker pool.
+
 **Accept when:**
 - Two-beam limit: matches the analytic pendellösung within 1%. The extinction distance is ξ_g = 1/(λ|U_g|), with U_g in Å⁻² as defined above (De Graef convention).
 - Si [110] at 200 kV: the thickness-dependent (002) intensity is non-zero (from double diffraction).
@@ -776,6 +910,15 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 ### M12: Export  *(3–5 d)*
 **Goal:** publication-quality output from every view.
 
+**Scope asked for by the user (2026-10-27), which replaces the list below where they differ:**
+1. **PNG** (with a stated DPI, no 1×-8× presets) and **vector SVG** for the structure (Structure Viewer tab), the diffraction pattern (Electron Diffraction tab) and the powder pattern (Powder XRD tab).
+2. **CSV**: the electron-diffraction spot list and the powder line profile.
+3. **Structure files**: CIF, XYZ (standard), XYZ (computem).
+4. **Copy to clipboard.**
+- XYZ (computem): line 1 the number of atoms in the view, line 2 the extent of the view `x y z`, then one line per atom with six columns (atomic number, x, y, z, occupancy, Debye-Waller factor B), and a last line `-1`.
+- Not asked for, so not done: the session file (`.crystallens.json`), CBED rasters, POSCAR.
+
+(Original plan, kept for the record:)
 - **PNG:**
   - 3D view: render offscreen at 1–8× scale (e.g., 4000 px wide), with a transparent-background option.
   - 2D views: rasterise the SVG at a chosen DPI.
@@ -790,6 +933,52 @@ Each `json/<name>.json` holds: `source` (COD id, CIF path, SHA-256), `cell`, `vo
 **Accept when:**
 - The SVGs open correctly in Inkscape and Illustrator, and the 3D SVG matches the screen view.
 - A session reload reproduces every view exactly.
+
+#### M12 status: ✅ reduced scope done 2026-10-27
+
+**Also done in this round (before M12):** the electron-diffraction ribbon was regrouped into three rows: **Zone axis + Structure range**, then **Beam + Specimen + Dynamical**, then **Pattern + Kikuchi/HOLZ** (the groups of a row share its line and wrap their own controls when it is narrow; below 62 rem each row wraps as before). Structure range keeps the 1×1×1 / 2×2×2 / 3×3×3 presets (the one that matches is highlighted) and has three boxes `[ ] × [ ] × [ ]` for the number of cells along a, b and c (whole numbers 1-20, counted from the origin, the upper boundary setting unchanged); the − / + buttons and the from-to boxes are gone. Zone axis keeps everything and gains **a b c** (beam along [100], [010], [001]) and **a\* b\* c\*** (beam along the plane normals; for a monoclinic cell a\* is not a zone axis, and the readout then shows the nearest one with its angle). The Structure Viewer got a **legend** (a ball in each atom's colour and its symbol, bottom right, fixed on the screen, in the colour of the atoms drawn; two colours of one element are told apart by site label; hidden atoms leave it; it is in the PNG and SVG exports).
+
+**Acceptance results:** 29 tests in `export.test.ts` (537 unit tests overall) and 18 in `m12.spec.ts` (98 browser tests overall); lint, format, types and Rust clean.
+- **PNG:** the size is the on-screen size × DPI / 96 (96 CSS pixels = 1 inch), shown live in the menu; the longest side is limited to 8192 px (the stated DPI then drops, and the message says so). The file carries a `pHYs` chunk with the DPI (checked in the browser test: 150 → 150.0, 300 → 300.0; CRC checked against the standard value `0xCBF43926` for "123456789"). White (or the viewer's background) behind it, or **transparent** (checked: corner alpha 0).
+- **3D SVG:** well-formed (parsed with the browser's DOMParser), no embedded bitmaps, one disc per atom (equal to the model's atom count), bonds as strokes as wide as the sticks, cell edges, the axes triad, optional atom names, the legend, one radial gradient per colour; **atom 0 is at the same pixel (±0.6) as on the screen**. Painter's order is checked (far to near, bonds and cell edges sorted in with the atoms and polyhedron faces). Perspective works too: sizes follow the distance. Toon mode gives flat fills with outlines.
+- **2D SVG** (diffraction pattern, powder plot): the page's own SVG, cloned; the style sheet's rules are written into the elements, the `class` and test attributes are removed, the background is a white rectangle (or none when transparent). No embedded bitmaps. The powder curve's blue and the ED label font survive in the file.
+- **CSV:** ED spot list (hkl, Laue zone, d, |g|, x, y, |F|, relative I, s_g, forbidden; a dynamical pattern adds I as a fraction of the incident beam and the kinematic-forbidden flag), strongest first; PXRD profile (2θ, d, Q, intensity; d and Q for the first wavelength) with as many rows as the profile has points; the PXRD peak table is also in the menu and identical to the table's own button.
+- **Structure files:** CIF = the P1 unit cell (the writer of M2); XYZ = the atoms of the view with Cartesian x y z in Å; XYZ (computem) as specified.
+- **Clipboard:** text (CSV, CIF, XYZ, SVG source) and PNG images are copied with the same code as the saves (checked in Chromium with the clipboard permission; the Windows clipboard returns CR LF).
+- Mutation-checked: reversed painter's order, wrong gradient colour, B without the factor 8, extras in the computem file, no shift to the corner, missing `-1`, hidden atoms kept, inverted pixels per metre, the chunk in the wrong place, wrong DPI base, no size limit, legend ignoring colours, CSV order each fail tests.
+
+**Built:**
+- `export/xyz.ts` (pure): `viewAtoms` (the atoms of the view: not hidden; Z, Cartesian position, occupancy, B = 8π²U from `atomicU`, in-range flag), `writeXyz`, `writeComputemXyz`, `rangeBox`.
+  - **computem box:** the extent is the box of the *range* (the 8 corners of the fractional range in Cartesian axes), so a 1×1×1 range of an orthogonal cell is exactly a, b, c even when no atom sits on the far faces; for a non-orthogonal cell it is the bounding box (graphite: 1.5a × (√3/2)a × c). Positions are measured from its lowest corner. Only atoms inside the range are written (the bonded extras shown just outside it are in the standard XYZ only). With the boundary option on, atoms on the upper faces are included and sit exactly at the extent.
+  - **Column 6 is B in Å², as asked (B = 8π²U).** Kirkland's own computem reads an rms displacement there instead; convert if the file goes to that program (u = sqrt(B / 8π²)).
+- `export/png.ts` (pure): `crc32`, `setPngDpi`, `readPngDpi`. `export/csv.ts` (pure): `spotsToCsv`, `profileToCsv`. `export/svg3d.ts` (pure): `buildStructureSvg(scene, {transparent})`, `shade`, `labelMap`; the scene is plain numbers in screen pixels with depths.
+- `export/browser.ts`: `rasterPlan`, `safeName`, downloads, clipboard, `serializeSvg`, `svgToCanvas`, `canvasToPng`, `paintLegend`. `export/rows.ts`: the rows of the menu (`textRow`, `svgImageRows`, `structureRows`).
+- `render/structureView.ts`: `exportScene` (projects atoms, half-bonds, cell, polyhedra and the triad with the live camera, ortho or perspective) and `renderToCanvas` (a second WebGL renderer draws the same scene at the target size, so the live view is not disturbed; the axes triad keeps its screen size).
+- `core/structure/legend.ts`: `legendEntries`.
+- `ui/ExportMenu.svelte`: one **Export ▾** button per tab opening a popover (so no card clips it; Esc closes it): DPI box (30-2400), transparent checkbox, the pixel size, a Save and a Copy button for each format, a status line. In the Structure Viewer it is a toolbar group; in the other two tabs it is in the header of the pattern panel. Files are named after the loaded file (`Si_structure.png`, `Si_zone_1_1_0_pattern.svg`, `Si_zone_1_1_0_spots.csv`, `Si_xrd.svg`, `Si_profile.csv`, `Si_P1.cif`, `Si.xyz`, `Si_computem.xyz`).
+- The Electron Diffraction tab also offers the three structure files for the structure on its left (its own range); the Powder tab offers the peak table as CSV as well.
+- `playwright.config.ts`: the port can be set with `E2E_PORT` (default 4173), since another local app may be on 4173 and `reuseExistingServer` would then test the wrong page.
+
+**Decisions and deviations:**
+1. **The 3D PNG is rendered again by WebGL at the target size** (not a rasterised SVG), so it looks exactly like the screen (lighting, toon). The 3D **SVG** is a separate drawing: radial-gradient discs are close to, not identical with, the lit spheres. Thin lines (the cell edges in the PNG) stay 1 device pixel wide at any DPI; the SVG has proper strokes.
+2. **Painter's algorithm limits:** a bond is sorted by the middle of each half-stick, so an unusual overlap (a long bond passing in front of one atom and behind another) can be drawn in the wrong order; typical structures are fine.
+3. Not in the SVG: the measurement overlay and the selection highlight; they are not part of a figure.
+4. **Fonts are named, not embedded** (system sans/mono stacks with fallbacks), so a viewer without them substitutes another font. Convert text to paths in Inkscape/Illustrator for a journal if needed.
+5. Not checked here: opening the SVGs in Inkscape or Illustrator (only a browser parser was available).
+6. The CIF is the P1 cell (as the Inspector's existing button), not a symmetry-reduced file.
+7. Not done (not asked): the session file, CBED rasters (no CBED rasters exist), POSCAR.
+
+#### Layout revision (2026-10-27, asked by the user): one layout for the three tabs
+
+This replaces the statements above about where the menus, the ribbon groups and the CSV files are.
+- **View panels:** each has a header strip: its name and an **Export ▾** image menu on the left (PNG with DPI and transparency, SVG; Save and Copy), its Reset buttons on the right. Structure Viewer: "Structure Viewer", Reset view, Reset zoom. ED structure: "Structure" (its own PNG/SVG of the left view), Reset zoom. ED pattern: "Diffraction pattern", Pan/Tilt, − Reset +. Powder: "Powder pattern · radiation", − Reset +. "Fit" is renamed Reset everywhere. The image menus hold only PNG and SVG. Shared styles: `.phead`, `.phead-title`, `.phead-tools` in `app.css`.
+- **Structure Viewer ribbon:** the Reset group is gone (Reset view/zoom are in the panel header; **Reset range** is in the Range tab of the sidebar). A **File** group holds **Export structure file ▾**: CIF, XYZ, XYZ (computem), **Save only** (no Copy, no DPI).
+- **Electron Diffraction:** the ribbon is Zone axis, Structure range, Dynamical and Tools (Measure). A **sidebar** like the Structure Viewer's (resizable, collapsible, remembered under `crystallens.edPanel`) holds **Parameters** (voltage and presets, λ, thickness, excitation-error profile, Debye-Waller factor), **Pattern** (Laue zones, intensity scale, exposure, index labels, forbidden reflections, **Save spot list (CSV)**) and **Kikuchi / HOLZ** (Kikuchi bands and count, HOLZ rings, CBED disc and α, strain). The sidebar takes the height of the two square panels. The ED tab no longer offers structure files.
+- **Camera length removed** (setting, box and the "mm at L" part of the scale bar, and `detectorRadius`): the wheel zooms, and the scale bar is in Å⁻¹ only.
+- **Powder XRD:** the peak table's header has **Save peak table (CSV)** and **Save profile (CSV)**.
+- **Legend:** larger (balls about 18 px, text 15 px on screen); the PNG and SVG use the same sizes (`LEGEND` in `export/svg3d.ts`).
+- `ui/SidePanel.svelte` is the shared sidebar shell (tab bar, resize handle, collapse rail, stored width); `ViewPanel.svelte` and the new `EDPanel.svelte` only hold the tab contents. `export/rows.ts` gained `structureImageRows` (PNG/SVG of any 3D view), used by both 3D panels.
+- Tests: `m12.spec.ts` checks the header order (name, Export, then Reset on the right) in all four panels, that no button says Fit, the ribbon groups and sidebar tabs of ED, the save-only structure-file menu, the image-only menus, the ED structure PNG/SVG, the CSV buttons, and the legend size. 99 browser tests, 536 unit tests pass.
 
 ---
 
@@ -934,6 +1123,7 @@ Everything above must be green before a module is considered done (CI runs the s
 ```bash
 cd app
 "/c/Users/cha_lab/.conda/envs/s-em/python.exe" -I scripts/make_fixtures.py          # JSON from committed CIFs
+"/c/Users/cha_lab/.conda/envs/s-em/python.exe" -I scripts/make_ed_reference.py      # M8: tests/fixtures/ed/lobato_reference.json
 "/c/Users/cha_lab/.conda/envs/s-em/python.exe" -I scripts/make_fixtures.py --fetch  # also download missing CIFs from COD
 ```
 `-I` keeps the working directory off `sys.path` because the CIFs are downloaded (untrusted) data. Outputs are rounded to 10 significant digits so reruns do not churn. A new fixture = one line in `FIXTURES` plus a `--fetch` run; the unit test `fixture set` then needs its expected name list updated.

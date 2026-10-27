@@ -7,3 +7,4 @@ export * from './polyhedra';
 export * from './range';
 export * from './settings';
 export * from './styles';
+export * from './legend';

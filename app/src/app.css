@@ -119,3 +119,44 @@ input[type='range'] {
 details > summary {
   cursor: pointer;
 }
+
+/* The header strip of a view panel: its name and Export menu on the left, its Reset and zoom
+   buttons on the right (the same in every tab). */
+.phead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.phead-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.phead-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  margin-left: auto;
+}
+.phead-tools button {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.78rem;
+}
+.phead-title button {
+  padding: 0.05rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}

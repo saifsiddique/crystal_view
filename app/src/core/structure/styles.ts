@@ -43,7 +43,7 @@ export interface AppearanceSettings {
   labels: LabelMode;
 }
 
-export const DEFAULT_BACKGROUND = '#eef1f7';
+export const DEFAULT_BACKGROUND = '#ffffff';
 
 export const defaultAppearance = (): AppearanceSettings => ({
   displayStyle: 'ballStick',

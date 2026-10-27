@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The CrystalLens mark: a unit cell seen along its body diagonal, inside a lens.
+  // The Crystal Viewer Lite mark: a unit cell seen along its body diagonal, inside a lens.
   let { size = 40 }: { size?: number } = $props();
 </script>
 

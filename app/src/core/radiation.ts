@@ -21,6 +21,32 @@ export const XRAY_LINES: readonly XrayLine[] = [
   { id: 'AgKa1', label: 'Ag Kα₁', lambda: 0.5594075 },
 ];
 
+/** A Kα doublet: both wavelengths (angstrom) of an anode. */
+export interface XrayDoublet {
+  id: string;
+  label: string;
+  /** Kα₁ (Hölzer et al. 1997, as in XRAY_LINES) and Kα₂ in angstrom. */
+  lambda1: number;
+  lambda2: number;
+}
+
+/**
+ * Kα₁ and Kα₂ of the common anodes. Kα₂ is from the standard tables (Bearden 1967, as in the
+ * International Tables Vol. C); the two sources differ by less than 1e-4 angstrom, i.e. 0.005° in
+ * 2θ at Cu, which is far below any peak width. The intensity ratio I(Kα₂)/I(Kα₁) is about 0.5.
+ */
+export const XRAY_DOUBLETS: readonly XrayDoublet[] = [
+  { id: 'CuKa', label: 'Cu Kα', lambda1: 1.5405929, lambda2: 1.54439 },
+  { id: 'CoKa', label: 'Co Kα', lambda1: 1.788996, lambda2: 1.79285 },
+  { id: 'MoKa', label: 'Mo Kα', lambda1: 0.7093171, lambda2: 0.71359 },
+  { id: 'CrKa', label: 'Cr Kα', lambda1: 2.289726, lambda2: 2.29361 },
+  { id: 'FeKa', label: 'Fe Kα', lambda1: 1.936041, lambda2: 1.93998 },
+  { id: 'AgKa', label: 'Ag Kα', lambda1: 0.5594075, lambda2: 0.563798 },
+];
+
+/** I(Kα₂) / I(Kα₁), the usual value. */
+export const KALPHA_RATIO = 0.5;
+
 /** The default everywhere a wavelength is needed: Cu Kalpha1. */
 export const DEFAULT_XRAY_LINE: XrayLine = XRAY_LINES[0];
 

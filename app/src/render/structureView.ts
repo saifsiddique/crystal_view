@@ -52,7 +52,9 @@ import { pickSphere } from '../core/structure/pick';
 import type { StructureModel } from '../core/structure/model';
 import type { PolyhedraGeometry } from '../core/structure/polyhedra';
 import { MANUAL_RULE } from '../core/structure/bonds';
-import type { Appearance, Colours } from '../core/structure/styles';
+import { rgbToHex, type Appearance, type Colours } from '../core/structure/styles';
+import type { LegendEntry } from '../core/structure/legend';
+import type { SvgAxis, SvgScene, SvgSegment, SvgTriangle } from '../export/svg3d';
 
 export type Projection = 'ortho' | 'persp';
 
@@ -112,6 +114,8 @@ export class StructureView {
   private atomColourArrays: Float32Array[] = [];
   private polyMesh: Mesh | null = null;
   private polyEdges: LineSegments | null = null;
+  /** What `setPolyhedra` was given, kept for the SVG export. */
+  private polyInfo: { geometry: PolyhedraGeometry; opacity: number; edges: boolean } | null = null;
   private atomMeshes: InstancedMesh[] = [];
   private atomMembers: Uint32Array[] = [];
   private bondMesh: InstancedMesh | null = null;
@@ -119,6 +123,8 @@ export class StructureView {
   private readonly measureLines: LineSegments;
   private selection: number[] = [];
   private selectionLimit = 0;
+  /** False: no hover picking and no click selection (the electron-diffraction tab's view). */
+  private picking = true;
   private gestureDir: Vec3 = [0, 0, -1];
 
   private sphereCache: SphereGeometry | null = null;
@@ -415,6 +421,7 @@ export class StructureView {
     this.polyMesh.renderOrder = 5;
     this.polyMesh.frustumCulled = false;
     this.scene.add(this.polyMesh);
+    this.polyInfo = { geometry, opacity, edges };
     if (edges && geometry.edges.length > 0) {
       const eg = new BufferGeometry();
       const ep = new Float32Array(geometry.edges.length);
@@ -440,9 +447,19 @@ export class StructureView {
     }
     this.polyMesh = null;
     this.polyEdges = null;
+    this.polyInfo = null;
   }
 
   /** 0 allows any number of selected atoms; otherwise the oldest is dropped past the limit. */
+  /** Turn atom hover and click selection on or off. */
+  setPicking(on: boolean): void {
+    this.picking = on;
+    if (!on) {
+      this.hoverDirty = false;
+      if (this.selection.length > 0) this.setSelection([]);
+    }
+  }
+
   setSelectionLimit(limit: number): void {
     this.selectionLimit = limit;
     if (limit > 0 && this.selection.length > limit) this.setSelection(this.selection.slice(-limit));
@@ -999,7 +1016,7 @@ export class StructureView {
   private readonly onPointerMove = (e: PointerEvent): void => {
     this.pointerX = e.clientX;
     this.pointerY = e.clientY;
-    if (e.buttons === 0) this.hoverDirty = true;
+    if (e.buttons === 0 && this.picking) this.hoverDirty = true;
   };
 
   private readonly onPointerLeave = (): void => {
@@ -1023,7 +1040,7 @@ export class StructureView {
 
   private readonly onPointerUp = (e: PointerEvent): void => {
     const moved = Math.hypot(e.clientX - this.downX, e.clientY - this.downY);
-    if (this.downButton !== 0 || e.button !== 0 || moved > 4) return;
+    if (!this.picking || this.downButton !== 0 || e.button !== 0 || moved > 4) return;
     const hit = this.pickAt(e.clientX, e.clientY);
     if (hit === null) {
       if (this.selection.length > 0) this.setSelection([]);
@@ -1075,9 +1092,14 @@ export class StructureView {
   };
 
   private draw(): void {
+    this.positionLight();
+    this.drawWith(this.renderer, this.width, this.height, 1);
+  }
+
+  /** The key light sits up and to the left of the camera, so shading follows the rotation. */
+  private positionLight(): void {
     const camera = this.camera;
     camera.updateMatrixWorld();
-    // The key light sits up and to the left of the camera, so shading follows the rotation.
     const e = camera.matrixWorld.elements;
     const t = this.controls.target;
     const reach = this.distance;
@@ -1088,11 +1110,18 @@ export class StructureView {
     );
     this.sun.target.position.copy(t);
     this.sun.target.updateMatrixWorld();
+  }
 
-    const r = this.renderer;
+  /**
+   * Draw the scene and the axes triad with `r` into a w × h pixel target. `f` is the scale of that
+   * target against the screen (the triad keeps its size on the picture).
+   */
+  private drawWith(r: WebGLRenderer, w: number, h: number, f: number): void {
+    const camera = this.camera;
+    const t = this.controls.target;
     r.autoClear = true;
     r.setScissorTest(false);
-    r.setViewport(0, 0, this.width, this.height);
+    r.setViewport(0, 0, w, h);
     r.render(this.scene, camera);
 
     if (this.showAxes && this.triadGroup) {
@@ -1100,17 +1129,259 @@ export class StructureView {
       tc.up.copy(camera.up);
       tc.position.copy(camera.position).sub(t).normalize().multiplyScalar(6);
       tc.lookAt(0, 0, 0);
-      const size = Math.min(TRIAD_SIZE, this.width / 2, this.height / 2);
+      const size = Math.min(TRIAD_SIZE, this.width / 2, this.height / 2) * f;
+      const off = 8 * f;
       r.autoClear = false;
       r.clearDepth();
       r.setScissorTest(true);
-      r.setViewport(8, 8, size, size);
-      r.setScissor(8, 8, size, size);
+      r.setViewport(off, off, size, size);
+      r.setScissor(off, off, size, size);
       r.render(this.triadScene, tc);
       r.setScissorTest(false);
-      r.setViewport(0, 0, this.width, this.height);
+      r.setViewport(0, 0, w, h);
       r.autoClear = true;
     }
+  }
+
+  // ---- export ------------------------------------------------------------------------------------
+
+  /** Size of the view in CSS pixels. */
+  get size(): { width: number; height: number } {
+    return { width: this.width, height: this.height };
+  }
+
+  /**
+   * The picture as it is now, rendered offscreen at `pxW` × `pxH` pixels (same aspect as the view)
+   * on a transparent background: a 2D canvas to composite on. Null when WebGL cannot make a target
+   * that large.
+   */
+  renderToCanvas(pxW: number, pxH: number): HTMLCanvasElement | null {
+    if (!this.model) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = pxW;
+    canvas.height = pxH;
+    let r: WebGLRenderer | null = null;
+    try {
+      r = new WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+      r.setPixelRatio(1);
+      r.setSize(pxW, pxH, false);
+      r.setClearColor(0xffffff, 0);
+      this.positionLight();
+      this.drawWith(r, pxW, pxH, pxW / this.width);
+      const out = document.createElement('canvas');
+      out.width = pxW;
+      out.height = pxH;
+      const ctx = out.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(canvas, 0, 0);
+      return out;
+    } catch {
+      return null;
+    } finally {
+      r?.dispose();
+      r?.forceContextLoss();
+    }
+  }
+
+  /**
+   * What is drawn, as numbers in screen pixels with the distance from the camera, for the vector
+   * export. `extras` carries what only the page knows: background colour, atom label texts (by
+   * model index) and the legend.
+   */
+  exportScene(extras: {
+    background: string;
+    labels: Map<number, string>;
+    legend: LegendEntry[];
+  }): SvgScene | null {
+    const model = this.model;
+    const app = this.app;
+    if (!model || !app) return null;
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    const W = this.width;
+    const H = this.height;
+    const q = this.v2;
+    const persp = camera === this.persp;
+    const orthoScale = H / (this.viewHeight() / this.ortho.zoom);
+    const tanHalf = Math.tan((FOV * Math.PI) / 360);
+
+    // screen x, y and the distance from the camera of a scene point; the scale is pixels per angstrom
+    const at = { x: 0, y: 0, depth: 0, scale: 1 };
+    const place = (x: number, y: number, z: number): void => {
+      q.set(x, y, z).applyMatrix4(camera.matrixWorldInverse);
+      at.depth = -q.z;
+      at.scale = persp ? H / (2 * Math.max(1e-6, at.depth) * tanHalf) : orthoScale;
+      q.applyMatrix4(camera.projectionMatrix);
+      at.x = (q.x * 0.5 + 0.5) * W;
+      at.y = (-q.y * 0.5 + 0.5) * H;
+    };
+    const behind = () => persp && at.depth <= 0;
+    const P = this.pos;
+
+    const atoms: SvgScene['atoms'] = [];
+    for (let i = 0; i < model.count; i++) {
+      if (app.atomVisible[i] !== 1) continue;
+      place(P[3 * i], P[3 * i + 1], P[3 * i + 2]);
+      if (behind()) continue;
+      const r = app.atomRadius[i] * at.scale;
+      if (at.x + r < 0 || at.x - r > W || at.y + r < 0 || at.y - r > H) continue;
+      atoms.push({
+        index: i,
+        x: at.x,
+        y: at.y,
+        r,
+        depth: at.depth,
+        color: rgbToHex(app.atomColor[3 * i], app.atomColor[3 * i + 1], app.atomColor[3 * i + 2]),
+      });
+    }
+
+    const bonds: SvgSegment[] = [];
+    if (app.bondsDrawn && this.bondMesh?.visible) {
+      const nb = model.bonds.length / 2;
+      for (let b = 0; b < nb; b++) {
+        if (app.bondVisible[b] !== 1) continue;
+        const i = model.bonds[2 * b];
+        const j = model.bonds[2 * b + 1];
+        const ri = model.bondRule[b];
+        const ruleOwn = ri !== MANUAL_RULE && app.ruleColored[ri] === 1;
+        for (let half = 0; half < 2; half++) {
+          const from = half === 0 ? i : j;
+          const to = half === 0 ? j : i;
+          const rgb = ruleOwn
+            ? [app.ruleColor[3 * ri], app.ruleColor[3 * ri + 1], app.ruleColor[3 * ri + 2]]
+            : [app.atomColor[3 * from], app.atomColor[3 * from + 1], app.atomColor[3 * from + 2]];
+          const ax = P[3 * from];
+          const ay = P[3 * from + 1];
+          const az = P[3 * from + 2];
+          const mx = (ax + P[3 * to]) / 2;
+          const my = (ay + P[3 * to + 1]) / 2;
+          const mz = (az + P[3 * to + 2]) / 2;
+          place(ax, ay, az);
+          if (behind()) continue;
+          const x1 = at.x;
+          const y1 = at.y;
+          place(mx, my, mz);
+          if (behind()) continue;
+          const x2 = at.x;
+          const y2 = at.y;
+          if ((x1 < 0 && x2 < 0) || (x1 > W && x2 > W) || (y1 < 0 && y2 < 0) || (y1 > H && y2 > H))
+            continue;
+          // depth of the middle of the half-stick
+          place((ax + mx) / 2, (ay + my) / 2, (az + mz) / 2);
+          bonds.push({
+            x1,
+            y1,
+            x2,
+            y2,
+            depth: at.depth,
+            color: rgbToHex(rgb[0], rgb[1], rgb[2]),
+            width: 2 * app.bondRadius[b] * at.scale,
+          });
+        }
+      }
+    }
+
+    const cell: SvgSegment[] = [];
+    if (this.showCell && this.cellLines) {
+      const a = this.cellLines.geometry.getAttribute('position').array as Float32Array;
+      for (let k = 0; k + 5 < a.length; k += 6) {
+        place(a[k], a[k + 1], a[k + 2]);
+        const x1 = at.x;
+        const y1 = at.y;
+        place(a[k + 3], a[k + 4], a[k + 5]);
+        const x2 = at.x;
+        const y2 = at.y;
+        place((a[k] + a[k + 3]) / 2, (a[k + 1] + a[k + 4]) / 2, (a[k + 2] + a[k + 5]) / 2);
+        cell.push({ x1, y1, x2, y2, depth: at.depth, color: '#5b6578', width: 1 });
+      }
+    }
+
+    const triangles: SvgTriangle[] = [];
+    const polyEdges: SvgSegment[] = [];
+    const poly = this.polyInfo;
+    if (poly) {
+      const g = poly.geometry;
+      const o = this.origin;
+      const pts = [0, 0, 0, 0, 0, 0] as SvgTriangle['pts'];
+      for (let t = 0; t < g.triangles.length / 9; t++) {
+        let depth = 0;
+        let hidden = false;
+        for (let v = 0; v < 3; v++) {
+          place(
+            g.triangles[9 * t + 3 * v] - o[0],
+            g.triangles[9 * t + 3 * v + 1] - o[1],
+            g.triangles[9 * t + 3 * v + 2] - o[2],
+          );
+          if (behind()) hidden = true;
+          pts[2 * v] = at.x;
+          pts[2 * v + 1] = at.y;
+          depth += at.depth / 3;
+        }
+        if (hidden) continue;
+        triangles.push({
+          pts: [...pts] as SvgTriangle['pts'],
+          depth,
+          color: rgbToHex(
+            g.triangleColor[9 * t],
+            g.triangleColor[9 * t + 1],
+            g.triangleColor[9 * t + 2],
+          ),
+        });
+      }
+      if (poly.edges) {
+        for (let e = 0; e < g.edges.length / 6; e++) {
+          place(g.edges[6 * e] - o[0], g.edges[6 * e + 1] - o[1], g.edges[6 * e + 2] - o[2]);
+          const x1 = at.x;
+          const y1 = at.y;
+          const d1 = at.depth;
+          place(g.edges[6 * e + 3] - o[0], g.edges[6 * e + 4] - o[1], g.edges[6 * e + 5] - o[2]);
+          polyEdges.push({
+            x1,
+            y1,
+            x2: at.x,
+            y2: at.y,
+            depth: (d1 + at.depth) / 2,
+            color: rgbToHex(g.edgeColor[6 * e], g.edgeColor[6 * e + 1], g.edgeColor[6 * e + 2]),
+            width: 1,
+          });
+        }
+      }
+    }
+
+    let triad: SvgScene['triad'] = null;
+    if (this.showAxes && this.triadGroup && this.lattice) {
+      const size = Math.min(TRIAD_SIZE, W / 2, H / 2);
+      const unit = size / 3.2; // the triad camera sees ±1.6 across `size` pixels
+      const M = this.lattice.M;
+      const colours = ['#e5484d', '#30a46c', '#3e63dd'];
+      const axes: SvgAxis[] = [0, 1, 2].map((k) => {
+        const d = this.v1
+          .set(M[0][k], M[1][k], M[2][k])
+          .transformDirection(camera.matrixWorldInverse);
+        return {
+          dx: d.x * unit,
+          dy: -d.y * unit,
+          depth: -d.z,
+          name: 'abc'[k],
+          color: colours[k],
+        };
+      });
+      triad = { cx: 8 + size / 2, cy: H - 8 - size / 2, axes };
+    }
+
+    return {
+      width: W,
+      height: H,
+      background: extras.background,
+      toon: this.toon,
+      atoms,
+      bonds,
+      cell,
+      polyhedra: { triangles, opacity: poly?.opacity ?? 0, edges: polyEdges },
+      triad,
+      labels: extras.labels,
+      legend: extras.legend,
+    };
   }
 }
 

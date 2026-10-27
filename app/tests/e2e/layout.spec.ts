@@ -13,7 +13,9 @@ test('the title is centred, the status pill sits top right, and the file button 
   page,
 }) => {
   await page.goto('/');
-  const h1 = (await page.getByRole('heading', { name: 'CrystalLens', level: 1 }).boundingBox())!;
+  const h1 = (await page
+    .getByRole('heading', { name: 'Crystal Viewer Lite', level: 1 })
+    .boundingBox())!;
   const brandCentre = h1.x + h1.width / 2;
   expect(Math.abs(brandCentre - 700)).toBeLessThan(120); // logo + title block centred
   const pill = (await page.locator('.status summary').boundingBox())!;
@@ -38,6 +40,7 @@ test('the settings panel is tabbed, with no horizontal scrolling on any tab', as
       'true',
     );
     const overflow = await page
+      .getByTestId('side-panel')
       .locator('[role="tabpanel"]')
       .evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(overflow, tab).toBeLessThanOrEqual(1);

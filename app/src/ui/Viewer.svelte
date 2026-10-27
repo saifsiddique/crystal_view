@@ -1,5 +1,5 @@
 <script lang="ts">
-  // 3D structure viewer (M5, M6). The real interface (M14) will wrap this with menus and tabs.
+  // 3D structure viewer (M5-M7), the "Structure Viewer" tab. M14 will wrap it with menus.
   import { onMount, tick, untrack } from 'svelte';
   import type { Crystal } from '../core/crystal';
   import type { Vec3 } from '../core/math/vec3';
@@ -7,16 +7,17 @@
     atomLabel,
     buildModel,
     buildPolyhedra,
-    defaultRange,
     defaultViewSettings,
     getBondGraph,
     hexToRgb,
+    legendEntries,
     measure,
     resolveAppearance,
     resolveColours,
     settingsForNewCrystal,
     type Appearance,
     type AtomRef,
+    type LegendEntry,
     type Measurement,
     type StructureModel,
     type ViewSettings,
@@ -30,12 +31,27 @@
     snapToZoneAxis,
     type ReadoutMemory,
   } from '../core/orientation';
+  import { paintLegend, safeName } from '../export/browser';
+  import { structureImageRows, structureRows, type ExportSection } from '../export/rows';
+  import { labelMap } from '../export/svg3d';
   import { StructureView } from '../render/structureView';
+  import ExportMenu from './ExportMenu.svelte';
   import { orientation } from './orientation.svelte';
   import Logo from './Logo.svelte';
-  import ViewPanel from './ViewPanel.svelte';
+  import SidePanel from './SidePanel.svelte';
+  import ViewPanel, { VIEW_TABS, type ViewTab } from './ViewPanel.svelte';
 
-  let { crystal }: { crystal: Crystal | null } = $props();
+  let {
+    crystal,
+    fileName = '',
+    settings = $bindable(defaultViewSettings(null)),
+  }: {
+    crystal: Crystal | null;
+    /** Name of the loaded file: the stem of the exported files' names. */
+    fileName?: string;
+    /** Bound by the app so that the electron-diffraction tab can share the appearance. */
+    settings?: ViewSettings;
+  } = $props();
 
   let stage = $state<HTMLDivElement>();
   let canvas: HTMLCanvasElement;
@@ -45,7 +61,6 @@
   // True until a newly loaded crystal has been drawn once (with the default camera).
   let fresh = true;
 
-  let settings = $state<ViewSettings>(defaultViewSettings(null));
   let measuring = $state(false);
 
   let model = $state.raw<StructureModel | null>(null);
@@ -96,8 +111,10 @@
   const MAX_ATOM_LABELS = 4000;
   let labelCtx: CanvasRenderingContext2D | null = null;
   let labelTexts: string[] = [];
-  let labelInk = '#1b1d24';
-  let labelHalo = 'rgba(255,255,255,0.85)';
+  let labelInk = $state('#1b1d24');
+  let labelHalo = $state('rgba(255,255,255,0.85)');
+  /** One ball and name per kind of atom shown, bottom right (static: it does not turn). */
+  let legend = $state.raw<LegendEntry[]>([]);
   let lastApp: Appearance | null = null;
   let stageW = 1;
   let stageH = 1;
@@ -106,7 +123,13 @@
     const ctx = labelCtx;
     if (!ctx) return;
     ctx.clearRect(0, 0, stageW, stageH);
+    paintAtomLabels(ctx);
+  }
+
+  /** The atom names above their atoms, in CSS-pixel units (scale the context for a larger image). */
+  function paintAtomLabels(ctx: CanvasRenderingContext2D) {
     if (!view || !lastApp || labelTexts.length === 0) return;
+    ctx.save();
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
@@ -129,6 +152,7 @@
       ctx.strokeText(labelTexts[i], screen.x, screen.y - 2);
       ctx.fillText(labelTexts[i], screen.x, screen.y - 2);
     }
+    ctx.restore();
   }
 
   function onRendered() {
@@ -289,6 +313,7 @@
       bondsDrawn: () => view!.bondsDrawn,
       appearanceMs: () => lastApplyMs,
       polyhedra: () => ({ ...polyhedraInfo }),
+      legend: () => legend.map((e) => ({ ...e })),
     };
     ready = true;
     return () => {
@@ -410,7 +435,10 @@
     void appearanceKey;
     const shape = shapeKey;
     const colour = colourKey;
-    if (!m || !c) return;
+    if (!m || !c) {
+      legend = [];
+      return;
+    }
     untrack(() => {
       const t0 = performance.now();
       const snap = $state.snapshot(settings);
@@ -436,6 +464,7 @@
       lastShapeKey = shape;
       lastColourKey = colour;
       lastModelRevision = modelRevision;
+      if (changed) legend = legendEntries(c, m, lastApp);
 
       const polyKey = JSON.stringify(snap.polyhedra);
       if (changed || polyKey !== lastPolyKey) {
@@ -506,10 +535,6 @@
 
   // ---- toolbar actions ---------------------------------------------------------------------------
 
-  const resetRange = () => {
-    settings.range = defaultRange();
-  };
-
   function hideSelected() {
     if (!model || selection.length === 0) return;
     const refs = selection.map(refOf);
@@ -519,78 +544,44 @@
 
   const hovered = $derived(hover ? describe(hover.atom) : null);
 
-  // ---- side panel: resizable and collapsible, remembered in this browser -------------------------
+  // ---- export (M12) --------------------------------------------------------------------------------
 
-  const PANEL_MIN = 280;
-  const PANEL_MAX = 900;
-  const PANEL_DEFAULT = 380;
-  const PANEL_KEY = 'crystallens.viewPanel';
-  let panelWidth = $state(PANEL_DEFAULT);
-  let panelCollapsed = $state(false);
+  const baseName = () => safeName(fileName || (crystal?.name ?? ''));
 
-  try {
-    const saved = JSON.parse(localStorage.getItem(PANEL_KEY) ?? 'null') as {
-      width?: unknown;
-      collapsed?: unknown;
-    } | null;
-    if (saved && typeof saved.width === 'number' && Number.isFinite(saved.width))
-      panelWidth = Math.min(PANEL_MAX, Math.max(PANEL_MIN, saved.width));
-    if (saved && typeof saved.collapsed === 'boolean') panelCollapsed = saved.collapsed;
-  } catch {
-    // no storage (private window, blocked site data): the defaults stand
-  }
+  /** The panel header's menu: the picture with its atom names and legend. */
+  const imageSections: ExportSection[] = [
+    {
+      title: 'Image of the view',
+      image: true,
+      rows: structureImageRows({
+        view: () => view,
+        background: () => settings.appearance.background,
+        name: () => `${baseName()}_structure`,
+        labels: () => (lastApp ? labelMap(labelTexts, lastApp.atomVisible) : new Map()),
+        legend: () => legend,
+        overlay: (ctx, w, h) => {
+          paintAtomLabels(ctx);
+          paintLegend(ctx, legend, w, h, labelInk);
+        },
+      }),
+    },
+  ];
 
-  function savePanel() {
-    try {
-      localStorage.setItem(
-        PANEL_KEY,
-        JSON.stringify({ width: panelWidth, collapsed: panelCollapsed }),
-      );
-    } catch {
-      // ignore: remembering the layout is a convenience
-    }
-  }
+  /** The ribbon's menu: the structure as CIF and XYZ files. */
+  const fileSections: ExportSection[] = [
+    {
+      title: 'Structure file',
+      rows: structureRows(
+        () => (crystal && model ? { crystal, model, app: lastApp, range: settings.range } : null),
+        baseName,
+      ),
+    },
+  ];
 
-  function setPanelWidth(w: number) {
-    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth * 0.6));
-    panelWidth = Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
-    savePanel();
-  }
-
-  function setCollapsed(on: boolean) {
-    panelCollapsed = on;
-    savePanel();
-  }
-
-  function startResize(e: PointerEvent) {
-    if (e.button !== 0) return;
-    const handle = e.currentTarget as HTMLElement;
-    handle.setPointerCapture(e.pointerId);
-    const x0 = e.clientX;
-    const w0 = panelWidth;
-    const move = (ev: PointerEvent) => setPanelWidth(w0 + (x0 - ev.clientX));
-    const up = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', up);
-      handle.removeEventListener('pointercancel', up);
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', up);
-    handle.addEventListener('pointercancel', up);
-  }
-
-  function onHandleKey(e: KeyboardEvent) {
-    const d = e.shiftKey ? 80 : 20;
-    if (e.key === 'ArrowLeft') setPanelWidth(panelWidth + d);
-    else if (e.key === 'ArrowRight') setPanelWidth(panelWidth - d);
-    else return;
-    e.preventDefault();
-  }
+  let sideTab = $state<ViewTab>('range');
 </script>
 
 <section aria-label="Structure viewer" data-testid="viewer" class="viewer">
-  <h2 class="section-title">Structure viewer</h2>
-
   <div class="toolbar card">
     <fieldset class="tgroup" disabled={!crystal}>
       <legend>Display</legend>
@@ -771,129 +762,152 @@
         <label class="chip" title="Click 2, 3 or 4 atoms for a distance, angle or torsion">
           <input type="checkbox" bind:checked={measuring} data-testid="measure" /> Measure
         </label>
-        <span class="seg" role="group" aria-label="Reset">
-          <button
-            type="button"
-            onclick={() => view?.resetOrientation()}
-            title="Default orientation and centring; the zoom stays">Reset view</button
-          ><button
-            type="button"
-            onclick={() => view?.resetZoom()}
-            title="Magnification back to fit; orientation and pan stay">Reset zoom</button
-          ><button
-            type="button"
-            onclick={resetRange}
-            title="One cell with its boundary atoms, no slab">Reset range</button
-          >
-        </span>
+      </div>
+    </fieldset>
+
+    <fieldset class="tgroup" disabled={!crystal}>
+      <legend>File</legend>
+      <div class="ctl">
+        <ExportMenu
+          sections={fileSections}
+          disabled={!crystal}
+          testid="structure-file"
+          label="Export structure file"
+        />
       </div>
     </fieldset>
   </div>
 
   <div class="layout" class:withPanel={crystal !== null}>
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div
-      class="stage card"
-      bind:this={stage}
-      style:background={settings.appearance.background}
-      tabindex="0"
-      role="application"
-      aria-label="3D structure. Arrow keys tilt it."
-      onkeydown={onKeydown}
-      onpointerdown={() => stage?.focus({ preventScroll: true })}
-    >
-      <canvas bind:this={canvas} data-testid="viewer-canvas"></canvas>
-      <canvas bind:this={labelCanvas} class="overlay" data-testid="label-canvas"></canvas>
-
-      {#if !crystal}
-        <div class="empty">
-          <Logo size={56} />
-          <p>Open a CIF above to see its structure.</p>
-        </div>
-      {/if}
-      {#if error}
-        <p class="empty err" role="alert">{error}</p>
-      {/if}
-
-      {#if crystal}
-        <span class="readout" data-testid="orientation-readout">
-          {#if orientation.ready && orientation.uvw && orientation.hkl}
-            along [{orientation.uvw.indices.join(' ')}] ({fmt(orientation.uvw.angleDeg, 2)}° off) ·
-            normal to ({orientation.hkl.indices.join(' ')}) ({fmt(orientation.hkl.angleDeg, 2)}°
-            off)
-          {/if}
+    <div class="viewcol card">
+      <div class="phead">
+        <span class="phead-title">
+          <span>Structure Viewer</span>
+          <ExportMenu
+            sections={imageSections}
+            disabled={!crystal}
+            imageSize={() => view?.size ?? null}
+            testid="export"
+            compact
+          />
         </span>
-      {/if}
+        <span class="phead-tools">
+          <span class="seg" role="group" aria-label="Reset">
+            <button
+              type="button"
+              disabled={!crystal}
+              onclick={() => view?.resetOrientation()}
+              title="Default orientation and centring; the zoom stays"
+              data-testid="reset-view">Reset view</button
+            ><button
+              type="button"
+              disabled={!crystal}
+              onclick={() => view?.resetZoom()}
+              title="Magnification back to fit; orientation and pan stay"
+              data-testid="reset-zoom">Reset zoom</button
+            >
+          </span>
+        </span>
+      </div>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+      <div
+        class="stage"
+        bind:this={stage}
+        style:background={settings.appearance.background}
+        tabindex="0"
+        role="application"
+        aria-label="3D structure. Arrow keys tilt it."
+        onkeydown={onKeydown}
+        onpointerdown={() => stage?.focus({ preventScroll: true })}
+      >
+        <canvas bind:this={canvas} data-testid="viewer-canvas"></canvas>
+        <canvas bind:this={labelCanvas} class="overlay" data-testid="label-canvas"></canvas>
 
-      {#each measurements as m, i (i)}
-        <div class="mlabel" bind:this={labelEls[i]} data-testid="measurement">
-          {fmt(m.value, m.unit === 'Å' ? 3 : 2)}
-          {m.unit}
+        {#if !crystal}
+          <div class="empty">
+            <Logo size={56} />
+            <p>Open a CIF above to see its structure.</p>
+          </div>
+        {/if}
+        {#if error}
+          <p class="empty err" role="alert">{error}</p>
+        {/if}
+
+        {#if crystal}
+          <span class="readout" data-testid="orientation-readout">
+            {#if orientation.ready && orientation.uvw && orientation.hkl}
+              along [{orientation.uvw.indices.join(' ')}] ({fmt(orientation.uvw.angleDeg, 2)}° off)
+              · normal to ({orientation.hkl.indices.join(' ')}) ({fmt(orientation.hkl.angleDeg, 2)}°
+              off)
+            {/if}
+          </span>
+        {/if}
+
+        {#each measurements as m, i (i)}
+          <div class="mlabel" bind:this={labelEls[i]} data-testid="measurement">
+            {fmt(m.value, m.unit === 'Å' ? 3 : 2)}
+            {m.unit}
+          </div>
+        {/each}
+
+        {#if hover && hovered}
+          <div
+            class="tip"
+            data-testid="tooltip"
+            style:left={`${hover.x - stage!.getBoundingClientRect().left + 14}px`}
+            style:top={`${hover.y - stage!.getBoundingClientRect().top + 14}px`}
+          >
+            <strong>{hovered.label}</strong>
+            {hovered.element}
+            <div>frac {hovered.frac.map((x) => fmt(x)).join(' ')}</div>
+            <div>occ {fmt(hovered.occupancy, 3)}</div>
+            {#if hovered.added}<div>outside the range (bonded)</div>{/if}
+          </div>
+        {/if}
+
+        {#if legend.length > 0}
+          <ul
+            class="legend"
+            aria-label="Legend"
+            data-testid="legend"
+            style:color={labelInk}
+            style:--halo={labelHalo}
+          >
+            {#each legend as e (e.label + e.color)}
+              <li data-testid="legend-item">
+                <span class="ball" style:--c={e.color}></span><span>{e.label}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <div class="hud" data-testid="hud">
+          {#if model}{model.count.toLocaleString('en')} atoms · {(
+              model.bonds.length / 2
+            ).toLocaleString('en')} bonds ·
+          {/if}{fps > 0 ? `${fps} fps` : 'idle'}
         </div>
-      {/each}
-
-      {#if hover && hovered}
-        <div
-          class="tip"
-          data-testid="tooltip"
-          style:left={`${hover.x - stage!.getBoundingClientRect().left + 14}px`}
-          style:top={`${hover.y - stage!.getBoundingClientRect().top + 14}px`}
-        >
-          <strong>{hovered.label}</strong>
-          {hovered.element}
-          <div>frac {hovered.frac.map((x) => fmt(x)).join(' ')}</div>
-          <div>occ {fmt(hovered.occupancy, 3)}</div>
-          {#if hovered.added}<div>outside the range (bonded)</div>{/if}
-        </div>
-      {/if}
-
-      <div class="hud" data-testid="hud">
-        {#if model}{model.count.toLocaleString('en')} atoms · {(
-            model.bonds.length / 2
-          ).toLocaleString('en')} bonds ·
-        {/if}{fps > 0 ? `${fps} fps` : 'idle'}
       </div>
     </div>
 
     {#if crystal}
-      {#if panelCollapsed}
-        <button
-          type="button"
-          class="rail card"
-          onclick={() => setCollapsed(false)}
-          title="Show the settings panel"
-          data-testid="panel-expand"><span>⟨</span><span class="vtext">Settings</span></button
-        >
-      {:else}
-        <!-- a focusable separator is the WAI-ARIA window-splitter pattern -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-        <div
-          class="handle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the settings panel"
-          aria-valuenow={panelWidth}
-          aria-valuemin={PANEL_MIN}
-          aria-valuemax={PANEL_MAX}
-          tabindex="0"
-          title="Drag to resize; double-click for the default width"
-          onpointerdown={startResize}
-          ondblclick={() => setPanelWidth(PANEL_DEFAULT)}
-          onkeydown={onHandleKey}
-          data-testid="panel-handle"
-        ></div>
-        <aside class="side card" style:width={`${panelWidth}px`} data-testid="side-panel">
-          <ViewPanel
-            {crystal}
-            {model}
-            {selection}
-            bind:settings
-            {polyhedraInfo}
-            onHideSelected={hideSelected}
-            onCollapse={() => setCollapsed(true)}
-          />
-        </aside>
-      {/if}
+      <SidePanel
+        tabs={VIEW_TABS}
+        bind:tab={sideTab}
+        label="View settings"
+        storageKey="crystallens.viewPanel"
+        idPrefix="view"
+      >
+        <ViewPanel
+          tab={sideTab}
+          {crystal}
+          {model}
+          {selection}
+          bind:settings
+          {polyhedraInfo}
+          onHideSelected={hideSelected}
+        />
+      </SidePanel>
     {/if}
   </div>
 
@@ -913,14 +927,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-  }
-  .section-title {
-    margin: 0.5rem 0 0;
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
   }
 
   /* ---- toolbar: labelled groups of controls ---- */
@@ -1039,65 +1045,23 @@
     align-items: stretch;
     height: clamp(28rem, calc(100vh - 22.5rem), 70rem);
   }
+  .viewcol {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
   .stage {
     position: relative;
     flex: 1;
-    min-width: 0;
+    min-height: 0;
     overflow: hidden;
     touch-action: none;
   }
   .stage:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .handle {
-    flex: none;
-    width: 0.75rem;
-    cursor: col-resize;
-    position: relative;
-    touch-action: none;
-  }
-  .handle::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 4px;
-    height: 2.5rem;
-    transform: translate(-50%, -50%);
-    border-radius: 2px;
-    background: var(--border-strong);
-    transition: background 0.12s;
-  }
-  .handle:hover::after,
-  .handle:focus-visible::after {
-    background: var(--accent);
-  }
-  .handle:focus-visible {
-    outline: none;
-  }
-  .side {
-    flex: none;
-    box-sizing: border-box;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .rail {
-    flex: none;
-    margin-left: 0.75rem;
-    width: 2.4rem;
-    padding: 0.6rem 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.6rem;
-    border-radius: var(--radius);
-    color: var(--text);
-  }
-  .vtext {
-    writing-mode: vertical-rl;
-    letter-spacing: 0.06em;
-    font-weight: 600;
+    outline-offset: -2px;
   }
   @media (max-width: 60rem) {
     .layout.withPanel {
@@ -1105,26 +1069,10 @@
       height: auto;
       gap: 0.75rem;
     }
-    .layout.withPanel .stage {
+    .layout.withPanel .viewcol {
       height: 60vh;
       min-height: 22rem;
       flex: none;
-    }
-    .layout.withPanel .side {
-      width: auto !important;
-      height: 28rem;
-    }
-    .handle {
-      display: none;
-    }
-    .rail {
-      margin-left: 0;
-      width: auto;
-      flex-direction: row;
-      justify-content: center;
-    }
-    .vtext {
-      writing-mode: horizontal-tb;
     }
   }
   canvas {
@@ -1203,6 +1151,45 @@
     color: #1b1d24;
     font: 600 0.75rem var(--mono);
     z-index: 2;
+  }
+  .legend {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 2rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font:
+      0.95rem/1.2 system-ui,
+      -apple-system,
+      'Segoe UI',
+      Arial,
+      sans-serif;
+    pointer-events: none;
+    text-shadow:
+      0 0 3px var(--halo, rgba(255, 255, 255, 0.9)),
+      0 0 3px var(--halo, rgba(255, 255, 255, 0.9));
+  }
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .ball {
+    flex: none;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 50%;
+    border: 0.5px solid rgba(0, 0, 0, 0.3);
+    background: radial-gradient(
+      circle at 34% 30%,
+      color-mix(in srgb, var(--c) 38%, white),
+      var(--c) 45%,
+      color-mix(in srgb, var(--c) 55%, black)
+    );
   }
   .hud {
     position: absolute;

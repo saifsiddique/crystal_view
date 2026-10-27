@@ -13,15 +13,7 @@
     uvwToHkl,
   } from './core/lattice';
   import type { Vec3 } from './core/math/vec3';
-  import { bn, elementInfo, fe, fx, parseSpecies, sFromD } from './core/scattering';
   import { detectSpaceGroup, type DetectedSymmetry } from './symmetry/detect';
-  import {
-    DEFAULT_XRAY_LINE,
-    XRAY_LINES,
-    sFromTwoTheta,
-    twoThetaFromD,
-    twoThetaFromS,
-  } from './core/radiation';
   import LatticeVectors from './ui/LatticeVectors.svelte';
   import SpaceGroupSymbol from './ui/SpaceGroupSymbol.svelte';
 
@@ -80,48 +72,6 @@
       };
     } catch {
       return null;
-    }
-  });
-
-  // ---- low-index planes -------------------------------------------------------------------------
-  const planes = $derived.by(() => {
-    if (!crystal) return [];
-    const lat = crystal.lattice;
-    const seen: Record<string, { hkl: Vec3; d: number }> = {};
-    for (let h = -3; h <= 3; h++)
-      for (let k = -3; k <= 3; k++)
-        for (let l = -3; l <= 3; l++) {
-          if (h === 0 && k === 0 && l === 0) continue;
-          const d = dSpacing(lat, [h, k, l]);
-          const key = d.toFixed(6);
-          const prev = seen[key];
-          const better =
-            [h, k, l].filter((x) => x < 0).length <
-            (prev ? prev.hkl.filter((x) => x < 0).length : 9);
-          if (!prev || better) seen[key] = { hkl: [h, k, l], d };
-        }
-    return Object.values(seen)
-      .sort((a, b) => b.d - a.d)
-      .slice(0, 12);
-  });
-
-  // ---- radiation (Cu Kalpha1 unless changed) --------------------------------------------------
-  let lineId = $state(DEFAULT_XRAY_LINE.id);
-  const lambda = $derived((XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).lambda);
-
-  // ---- scattering lookup ------------------------------------------------------------------------
-  let speciesText = $state('Fe3+');
-  let angleMode = $state<'twoTheta' | 's'>('twoTheta');
-  let twoTheta = $state(40);
-  let sInput = $state(0.3);
-  const s = $derived(angleMode === 's' ? sInput : sFromTwoTheta(twoTheta, lambda));
-  const scat = $derived.by(() => {
-    try {
-      const sp = parseSpecies(speciesText);
-      const info = elementInfo(sp.element);
-      return { info, fx: fx(sp, s), fe: fe(sp, s), bn: bn(sp), error: '' };
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : String(e) };
     }
   });
 </script>
@@ -263,103 +213,11 @@
           </dl>
         {/if}
       </article>
-
-      <article class="card">
-        <header>
-          <h3>Largest d-spacings</h3>
-          <select bind:value={lineId} aria-label="radiation" data-testid="radiation">
-            {#each XRAY_LINES as l (l.id)}<option value={l.id}
-                >{l.label} ({l.lambda.toFixed(4)} Å)</option
-              >{/each}
-          </select>
-        </header>
-        <div class="scroll">
-          <table>
-            <thead
-              ><tr
-                ><th>(hkl)</th><th>d (Å)</th><th>2θ (°)</th><th>s = 1/2d</th><th>F² X-ray (rel.)</th
-                ></tr
-              ></thead
-            >
-            <tbody>
-              {#each planes as p (p.d)}
-                {@const F2 = (() => {
-                  let re = 0,
-                    im = 0;
-                  for (const a of c.atoms) {
-                    const ph =
-                      2 *
-                      Math.PI *
-                      (p.hkl[0] * a.frac[0] + p.hkl[1] * a.frac[1] + p.hkl[2] * a.frac[2]);
-                    const f = a.occupancy * fx(a.element, sFromD(p.d));
-                    re += f * Math.cos(ph);
-                    im += f * Math.sin(ph);
-                  }
-                  return re * re + im * im;
-                })()}
-                <tr
-                  ><td>{p.hkl.join(' ')}</td><td>{fmt(p.d)}</td><td
-                    >{fmt(twoThetaFromD(p.d, lambda), 3)}</td
-                  ><td>{fmt(sFromD(p.d))}</td><td>{F2 < 1e-6 ? '0 (absent)' : fmt(F2, 1)}</td></tr
-                >
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </article>
     {:else}
       <p class="empty card wide">
         Open a CIF to see its cell, symmetry, sites and lattice vectors.
       </p>
     {/if}
-
-    <article class="card">
-      <header><h3>Scattering factors</h3></header>
-      <div class="row">
-        <span>species</span><input
-          type="text"
-          bind:value={speciesText}
-          aria-label="species"
-          size="6"
-        />
-        <select bind:value={angleMode} aria-label="angle input">
-          <option value="twoTheta">2θ (°)</option>
-          <option value="s">s = sinθ/λ (Å⁻¹)</option>
-        </select>
-        {#if angleMode === 'twoTheta'}
-          <input type="number" step="1" min="0" max="180" bind:value={twoTheta} aria-label="2θ" />
-          <select bind:value={lineId} aria-label="wavelength">
-            {#each XRAY_LINES as l (l.id)}<option value={l.id}>{l.label}</option>{/each}
-          </select>
-        {:else}
-          <input type="number" step="0.05" min="0" bind:value={sInput} aria-label="s" />
-        {/if}
-      </div>
-      <p class="hint">
-        s = {fmt(s)} Å⁻¹, d = {fmt(1 / (2 * s), 3)} Å{#if angleMode === 's'}, 2θ = {fmt(
-            twoThetaFromS(s, lambda),
-            3,
-          )}° with {(XRAY_LINES.find((l) => l.id === lineId) ?? DEFAULT_XRAY_LINE).label}{/if}.
-      </p>
-      {#if scat.error}
-        <p class="err">{scat.error}</p>
-      {:else if scat.info}
-        <dl data-testid="scattering">
-          <dt>{scat.info.name} (Z = {scat.info.Z})</dt>
-          <dd>
-            <span class="swatch" style:background={scat.info.color}></span> mass {scat.info.mass} u ·
-            covalent
-            {scat.info.covalentRadius} Å
-          </dd>
-          <dt>f X-ray</dt>
-          <dd>{fmt(scat.fx)} e</dd>
-          <dt>f electron</dt>
-          <dd>{fmt(scat.fe)} Å</dd>
-          <dt>b neutron</dt>
-          <dd>{fmt(scat.bn)} fm</dd>
-        </dl>
-      {/if}
-    </article>
   </div>
 </section>
 
@@ -467,13 +325,6 @@
     margin: 0;
     font-family: var(--mono);
     color: var(--text-h);
-  }
-  .swatch {
-    display: inline-block;
-    width: 0.9em;
-    height: 0.9em;
-    border: 1px solid var(--border);
-    vertical-align: middle;
   }
   .warnings {
     margin-bottom: 0.75rem;

@@ -25,7 +25,7 @@ describe('fixture set', () => {
     expect(names).toEqual(
       ['NaCl', 'Si', 'ZrO2_baddeleyite', 'albite', 'graphite', 'olivine_partial', 'rutile'].sort(),
     );
-    expect(APP_NAME).toBe('CrystalLens');
+    expect(APP_NAME).toBe('Crystal Viewer Lite');
   });
 
   it('has a CIF for every fixture, unchanged since generation', () => {

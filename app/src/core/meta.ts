@@ -1,2 +1,2 @@
 /** Project-wide constants that carry no dependencies. Pure: no DOM, no Node. */
-export const APP_NAME = 'CrystalLens';
+export const APP_NAME = 'Crystal Viewer Lite';

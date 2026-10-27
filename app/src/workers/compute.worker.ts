@@ -1,6 +1,7 @@
 // Heavy-compute worker. Everything slow (> 16 ms) is exposed from here via Comlink so the UI
-// thread stays responsive (context.md 5.3). M0 only proves the Comlink + Rust/WASM pipeline.
+// thread stays responsive (context.md 5.3).
 import * as Comlink from 'comlink';
+import { solveBloch, type BlochMatrices, type BlochSolution } from '../core/diffraction/dynamical';
 import init, { sum_f64, version } from '../wasm/kernels.js';
 
 let ready: Promise<unknown> | undefined;
@@ -12,7 +13,7 @@ const api = {
     await ensureWasm();
     return version();
   },
-  /** Sums a typed array in WASM; proves typed arrays cross the boundary (needed from M11). */
+  /** Sums a typed array in WASM; proves typed arrays cross the boundary. */
   async sumF64(values: Float64Array): Promise<number> {
     await ensureWasm();
     return sum_f64(values);
@@ -20,6 +21,11 @@ const api = {
   /** Logical cores available to size the future worker pool (hardwareConcurrency - 1). */
   cores(): number {
     return navigator.hardwareConcurrency ?? 1;
+  },
+  /** Bloch-wave eigen-decomposition (M11): 0.1-2 s for 100-300 beams, so never on the UI thread. */
+  bloch(m: BlochMatrices): BlochSolution {
+    const s = solveBloch(m);
+    return Comlink.transfer(s, [s.gamma.buffer, s.q.buffer, s.ampRe.buffer, s.ampIm.buffer]);
   },
 };
 

@@ -1,6 +1,18 @@
+<script lang="ts" module>
+  export const VIEW_TABS = [
+    { id: 'range', label: 'Range' },
+    { id: 'bonds', label: 'Bonds' },
+    { id: 'polyhedra', label: 'Polyhedra' },
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'elements', label: 'Elements' },
+  ] as const;
+  export type ViewTab = (typeof VIEW_TABS)[number]['id'];
+</script>
+
 <script lang="ts">
   // The M6 controls: what is shown (range, slab, hidden atoms), how it is bonded, polyhedra, and
-  // how it looks. It edits `settings` in place; the Viewer reacts and redraws.
+  // how it looks, one sidebar tab at a time (the tab bar is the SidePanel's). It edits `settings`
+  // in place; the Viewer reacts and redraws.
   import type { Crystal } from '../core/crystal';
   import { dSpacing } from '../core/lattice';
   import { elementInfo } from '../core/scattering';
@@ -8,6 +20,7 @@
     addManualBond,
     applyRangePreset,
     defaultBondRules,
+    defaultRange,
     newBondRule,
     removeManualBond,
     ruleKey,
@@ -20,44 +33,22 @@
   } from '../core/structure';
 
   let {
+    tab,
     crystal,
     model,
     selection,
     settings = $bindable(),
     polyhedraInfo,
     onHideSelected,
-    onCollapse,
   }: {
+    tab: ViewTab;
     crystal: Crystal;
     model: StructureModel | null;
     selection: readonly number[];
     settings: ViewSettings;
     polyhedraInfo: { count: number; skipped: number };
     onHideSelected: () => void;
-    onCollapse?: () => void;
   } = $props();
-
-  const TABS = [
-    { id: 'range', label: 'Range' },
-    { id: 'bonds', label: 'Bonds' },
-    { id: 'polyhedra', label: 'Polyhedra' },
-    { id: 'appearance', label: 'Appearance' },
-    { id: 'elements', label: 'Elements' },
-  ] as const;
-  type Tab = (typeof TABS)[number]['id'];
-  let tab = $state<Tab>('range');
-
-  /** Left/Right arrows move between tabs (the WAI-ARIA tabs pattern). */
-  function onTabKey(e: KeyboardEvent) {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    e.preventDefault();
-    const i = TABS.findIndex((t) => t.id === tab);
-    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
-    tab = next.id;
-    (e.currentTarget as HTMLElement).parentElement
-      ?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)
-      ?.focus();
-  }
 
   const AXES = ['a', 'b', 'c'] as const;
   const elements = $derived([...new Set(crystal.sites.map((s) => s.element))]);
@@ -206,504 +197,423 @@
 </script>
 
 <div class="panel" data-testid="view-panel">
-  <div class="tabbar">
-    <div class="tabs" role="tablist" aria-label="View settings">
-      {#each TABS as t (t.id)}
-        <button
-          type="button"
-          role="tab"
-          id={`tab-${t.id}`}
-          data-tab={t.id}
-          aria-selected={tab === t.id}
-          aria-controls="view-tabpanel"
-          tabindex={tab === t.id ? 0 : -1}
-          class:active={tab === t.id}
-          onclick={() => (tab = t.id)}
-          onkeydown={onTabKey}>{t.label}</button
-        >
-      {/each}
-    </div>
-    {#if onCollapse}
+  {#if tab === 'range'}
+    <div class="presets">
+      <button type="button" onclick={() => preset('cell')} data-testid="preset-cell">1 cell</button>
+      <button type="button" onclick={() => preset('cellBoundary')} data-testid="preset-boundary"
+        >1 cell + boundary</button
+      >
+      <button type="button" onclick={() => preset('supercell2')} data-testid="preset-2"
+        >2×2×2</button
+      >
       <button
         type="button"
-        class="collapse"
-        onclick={onCollapse}
-        title="Hide the panel"
-        aria-label="Hide the panel"
-        data-testid="panel-collapse">⟩</button
+        onclick={() => (settings.range = defaultRange())}
+        title="One cell with its boundary atoms, no slab"
+        data-testid="reset-range">Reset range</button
       >
-    {/if}
-  </div>
-
-  <div class="body" role="tabpanel" id="view-tabpanel" aria-labelledby={`tab-${tab}`}>
-    {#if tab === 'range'}
-      <div class="presets">
-        <button type="button" onclick={() => preset('cell')} data-testid="preset-cell"
-          >1 cell</button
-        >
-        <button type="button" onclick={() => preset('cellBoundary')} data-testid="preset-boundary"
-          >1 cell + boundary</button
-        >
-        <button type="button" onclick={() => preset('supercell2')} data-testid="preset-2"
-          >2×2×2</button
-        >
+    </div>
+    <table class="grid">
+      <thead><tr><th></th><th>from</th><th>to</th></tr></thead>
+      <tbody>
+        {#each AXES as axis, k (axis)}
+          <tr>
+            <th scope="row">{axis}</th>
+            <td
+              ><input
+                type="number"
+                step="0.5"
+                aria-label={`${axis} min`}
+                value={settings.range.min[k]}
+                onchange={(e) => setBound('min', k, e.currentTarget.value)}
+              /></td
+            >
+            <td
+              ><input
+                type="number"
+                step="0.5"
+                aria-label={`${axis} max`}
+                value={settings.range.max[k]}
+                onchange={(e) => setBound('max', k, e.currentTarget.value)}
+              /></td
+            >
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+    <label class="row"
+      ><input type="checkbox" bind:checked={settings.range.boundary} data-testid="boundary" /> Include
+      boundary atoms</label
+    >
+    <label class="row"
+      ><input
+        type="checkbox"
+        checked={settings.range.slab !== null}
+        onchange={(e) => setSlab(e.currentTarget.checked)}
+        data-testid="slab"
+      /> Slab (cut from the box above)</label
+    >
+    {#if settings.range.slab}
+      {@const slab = settings.range.slab}
+      <div class="row">
+        plane (hkl)
+        {#each [0, 1, 2] as k (k)}
+          <input
+            class="n"
+            type="number"
+            step="1"
+            aria-label={`slab ${'hkl'[k]}`}
+            value={slab.hkl[k]}
+            onchange={(e) => setSlabHkl(k, e.currentTarget.value)}
+          />
+        {/each}
       </div>
-      <table class="grid">
-        <thead><tr><th></th><th>from</th><th>to</th></tr></thead>
+      <div class="row">
+        from
+        <input
+          class="n"
+          type="number"
+          step="0.5"
+          aria-label="slab offset"
+          value={slab.offset}
+          onchange={(e) => setSlabNumber('offset', e.currentTarget.value)}
+        />
+        thickness
+        <input
+          class="n"
+          type="number"
+          step="0.5"
+          min="0.1"
+          aria-label="slab thickness"
+          value={slab.thickness}
+          onchange={(e) => setSlabNumber('thickness', e.currentTarget.value)}
+        />
+        Å
+      </div>
+      <p class="hint">
+        d(hkl) = {dSpacing(crystal.lattice, slab.hkl as [number, number, number]).toFixed(3)} Å; the distance
+        is measured from the plane through the origin.
+      </p>
+    {/if}
+  {:else if tab === 'bonds'}
+    <label class="row"
+      ><input type="checkbox" bind:checked={settings.bonds.beyondRange} data-testid="beyond" /> Search
+      bonds beyond the range</label
+    >
+    <label class="row"
+      ><input
+        type="checkbox"
+        bind:checked={settings.bonds.completeMolecules}
+        data-testid="complete"
+      /> Complete molecules</label
+    >
+    {#if settings.bonds.rules.length === 0}
+      <p class="hint">No element pair of this structure is within bonding distance.</p>
+    {:else}
+      <table class="grid rules" data-testid="rules">
+        <colgroup
+          ><col class="c-pair" /><col /><col /><col /><col class="c-colour" /><col
+            class="c-shown"
+          /><col class="c-x" /></colgroup
+        >
+        <thead
+          ><tr
+            ><th>pair</th><th>min Å</th><th>max Å</th><th>r Å</th><th>colour</th><th>shown</th><th
+            ></th></tr
+          ></thead
+        >
         <tbody>
-          {#each AXES as axis, k (axis)}
+          {#each settings.bonds.rules as rule, i (ruleKey(rule.a, rule.b))}
             <tr>
-              <th scope="row">{axis}</th>
+              <th scope="row">{rule.a}–{rule.b}</th>
               <td
                 ><input
+                  class="n"
                   type="number"
-                  step="0.5"
-                  aria-label={`${axis} min`}
-                  value={settings.range.min[k]}
-                  onchange={(e) => setBound('min', k, e.currentTarget.value)}
+                  step="0.05"
+                  min="0"
+                  aria-label={`${rule.a}-${rule.b} min`}
+                  value={rule.min}
+                  onchange={(e) => setRuleNumber(i, 'min', e.currentTarget.value)}
                 /></td
               >
               <td
                 ><input
+                  class="n"
                   type="number"
-                  step="0.5"
-                  aria-label={`${axis} max`}
-                  value={settings.range.max[k]}
-                  onchange={(e) => setBound('max', k, e.currentTarget.value)}
+                  step="0.05"
+                  min="0"
+                  aria-label={`${rule.a}-${rule.b} max`}
+                  value={rule.max}
+                  onchange={(e) => setRuleNumber(i, 'max', e.currentTarget.value)}
                 /></td
+              >
+              <td
+                ><input
+                  class="n"
+                  type="number"
+                  step="0.02"
+                  min="0.02"
+                  aria-label={`${rule.a}-${rule.b} radius`}
+                  value={rule.radius}
+                  onchange={(e) => setRuleNumber(i, 'radius', e.currentTarget.value)}
+                /></td
+              >
+              <td class="colour">
+                <input
+                  type="color"
+                  aria-label={`${rule.a}-${rule.b} colour`}
+                  value={rule.color ?? '#9aa3b5'}
+                  oninput={(e) => (rule.color = e.currentTarget.value)}
+                />
+                <button
+                  type="button"
+                  class="small"
+                  title="Colour by the two atoms"
+                  disabled={!rule.color}
+                  onclick={() => (rule.color = undefined)}>auto</button
+                >
+              </td>
+              <td
+                ><input
+                  type="checkbox"
+                  aria-label={`${rule.a}-${rule.b} shown`}
+                  bind:checked={rule.visible}
+                /></td
+              >
+              <td
+                ><button
+                  type="button"
+                  class="small"
+                  aria-label={`remove ${rule.a}-${rule.b}`}
+                  onclick={() => settings.bonds.rules.splice(i, 1)}>×</button
+                ></td
               >
             </tr>
           {/each}
         </tbody>
       </table>
-      <label class="row"
-        ><input type="checkbox" bind:checked={settings.range.boundary} data-testid="boundary" /> Include
-        boundary atoms</label
+    {/if}
+    <div class="row">
+      <select bind:value={pairA} aria-label="pair element 1">
+        {#each elements as el (el)}<option value={el}>{el}</option>{/each}
+      </select>
+      –
+      <select bind:value={pairB} aria-label="pair element 2">
+        {#each elements as el (el)}<option value={el}>{el}</option>{/each}
+      </select>
+      <button type="button" onclick={addRule} disabled={pairExists} data-testid="add-rule"
+        >Add pair</button
       >
-      <label class="row"
-        ><input
-          type="checkbox"
-          checked={settings.range.slab !== null}
-          onchange={(e) => setSlab(e.currentTarget.checked)}
-          data-testid="slab"
-        /> Slab (cut from the box above)</label
+      <button
+        type="button"
+        onclick={() => (settings.bonds.rules = defaultBondRules(crystal))}
+        title="Back to the bonds found from covalent radii">Reset rules</button
       >
-      {#if settings.range.slab}
-        {@const slab = settings.range.slab}
-        <div class="row">
-          plane (hkl)
-          {#each [0, 1, 2] as k (k)}
+    </div>
+    <div class="row stack">
+      <button type="button" onclick={drawBond} disabled={!twoSelected} data-testid="draw-bond"
+        >Draw bond between the 2 selected atoms</button
+      >
+      <button
+        type="button"
+        onclick={deleteBond}
+        disabled={!twoSelected || !(bondedNow || manualCount > 0)}
+        data-testid="delete-bond">Delete that bond</button
+      >
+      <button
+        type="button"
+        disabled={manualCount === 0}
+        onclick={() => (settings.bonds.manual = { add: [], remove: [] })}
+        >Clear {manualCount} manual change{manualCount === 1 ? '' : 's'}</button
+      >
+    </div>
+  {:else if tab === 'polyhedra'}
+    <p class="hint">Coordination polyhedra around the chosen elements, from their bonds.</p>
+    <div class="row wrap">
+      {#each elements as el (el)}
+        <label
+          ><input
+            type="checkbox"
+            checked={settings.polyhedra.centres.includes(el)}
+            onchange={(e) => toggleCentre(el, e.currentTarget.checked)}
+            data-testid={`poly-${el}`}
+          />
+          {el}</label
+        >
+      {/each}
+    </div>
+    <label class="row"
+      >opacity
+      <input
+        type="range"
+        min="0.05"
+        max="1"
+        step="0.05"
+        bind:value={settings.polyhedra.opacity}
+        aria-label="polyhedra opacity"
+      />
+      {settings.polyhedra.opacity.toFixed(2)}</label
+    >
+    <label class="row"
+      ><input type="checkbox" bind:checked={settings.polyhedra.edges} /> Draw edges</label
+    >
+    {#if settings.polyhedra.centres.length > 0}
+      <p class="hint" data-testid="poly-info">
+        {polyhedraInfo.count} drawn{polyhedraInfo.skipped
+          ? `, ${polyhedraInfo.skipped} skipped because some neighbours are not shown (try "Search bonds beyond the range")`
+          : ''}.
+      </p>
+    {/if}
+  {:else if tab === 'appearance'}
+    <label class="row"
+      >Atom radii
+      <select bind:value={ap.radiusScheme} aria-label="radius scheme" data-testid="scheme">
+        <option value="auto">automatic (by style)</option>
+        <option value="covalent">covalent</option>
+        <option value="ionic">ionic (Shannon)</option>
+        <option value="vdw">van der Waals</option>
+        <option value="uniform">uniform</option>
+      </select></label
+    >
+    <label class="row"
+      >scale
+      <input
+        type="range"
+        min="0.2"
+        max="2"
+        step="0.05"
+        bind:value={ap.radiusScale}
+        aria-label="radius scale"
+      />
+      {ap.radiusScale.toFixed(2)}</label
+    >
+    {#if ap.radiusScheme === 'uniform'}
+      <label class="row"
+        >uniform radius
+        <input
+          class="n"
+          type="number"
+          min="0.1"
+          step="0.05"
+          bind:value={ap.uniformRadius}
+          aria-label="uniform radius"
+        />
+        Å</label
+      >
+    {/if}
+    <label class="row"
+      >Background
+      <input
+        type="color"
+        bind:value={ap.background}
+        aria-label="background colour"
+        data-testid="background"
+      />
+      <button type="button" class="small" onclick={() => (ap.background = DEFAULT_BACKGROUND)}
+        >default</button
+      ></label
+    >
+    <label class="row"
+      >Atom labels
+      <select bind:value={ap.labels} aria-label="atom labels" data-testid="labels">
+        <option value="none">none</option>
+        <option value="element">element</option>
+        <option value="site">site label</option>
+      </select></label
+    >
+  {:else}
+    <p class="hint">Show, colour and size each element and site; hide selected atoms.</p>
+    <ul class="tree" data-testid="tree">
+      {#each tree as node (node.element)}
+        <li>
+          <div class="row">
+            <input
+              type="checkbox"
+              checked={node.visible}
+              onchange={(e) => setElementVisible(node.element, e.currentTarget.checked)}
+              aria-label={`show ${node.element}`}
+            />
+            <input
+              type="color"
+              value={colourOf(node.element)}
+              oninput={(e) => setElementColour(node.element, e.currentTarget.value)}
+              aria-label={`${node.element} colour`}
+            />
+            <strong>{node.element}</strong>
             <input
               class="n"
               type="number"
-              step="1"
-              aria-label={`slab ${'hkl'[k]}`}
-              value={slab.hkl[k]}
-              onchange={(e) => setSlabHkl(k, e.currentTarget.value)}
+              step="0.05"
+              min="0.05"
+              placeholder="auto"
+              title="Radius in Å; empty for automatic"
+              aria-label={`${node.element} radius`}
+              value={ap.elements[node.element]?.radius ?? ''}
+              onchange={(e) => setElementRadius(node.element, e.currentTarget.value)}
             />
-          {/each}
-        </div>
-        <div class="row">
-          from
-          <input
-            class="n"
-            type="number"
-            step="0.5"
-            aria-label="slab offset"
-            value={slab.offset}
-            onchange={(e) => setSlabNumber('offset', e.currentTarget.value)}
-          />
-          thickness
-          <input
-            class="n"
-            type="number"
-            step="0.5"
-            min="0.1"
-            aria-label="slab thickness"
-            value={slab.thickness}
-            onchange={(e) => setSlabNumber('thickness', e.currentTarget.value)}
-          />
-          Å
-        </div>
-        <p class="hint">
-          d(hkl) = {dSpacing(crystal.lattice, slab.hkl as [number, number, number]).toFixed(3)} Å; the
-          distance is measured from the plane through the origin.
-        </p>
-      {/if}
-    {:else if tab === 'bonds'}
-      <label class="row"
-        ><input type="checkbox" bind:checked={settings.bonds.beyondRange} data-testid="beyond" /> Search
-        bonds beyond the range</label
-      >
-      <label class="row"
-        ><input
-          type="checkbox"
-          bind:checked={settings.bonds.completeMolecules}
-          data-testid="complete"
-        /> Complete molecules</label
-      >
-      {#if settings.bonds.rules.length === 0}
-        <p class="hint">No element pair of this structure is within bonding distance.</p>
-      {:else}
-        <table class="grid rules" data-testid="rules">
-          <colgroup
-            ><col class="c-pair" /><col /><col /><col /><col class="c-colour" /><col
-              class="c-shown"
-            /><col class="c-x" /></colgroup
-          >
-          <thead
-            ><tr
-              ><th>pair</th><th>min Å</th><th>max Å</th><th>r Å</th><th>colour</th><th>shown</th><th
-              ></th></tr
-            ></thead
-          >
-          <tbody>
-            {#each settings.bonds.rules as rule, i (ruleKey(rule.a, rule.b))}
-              <tr>
-                <th scope="row">{rule.a}–{rule.b}</th>
-                <td
-                  ><input
-                    class="n"
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    aria-label={`${rule.a}-${rule.b} min`}
-                    value={rule.min}
-                    onchange={(e) => setRuleNumber(i, 'min', e.currentTarget.value)}
-                  /></td
-                >
-                <td
-                  ><input
-                    class="n"
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    aria-label={`${rule.a}-${rule.b} max`}
-                    value={rule.max}
-                    onchange={(e) => setRuleNumber(i, 'max', e.currentTarget.value)}
-                  /></td
-                >
-                <td
-                  ><input
-                    class="n"
-                    type="number"
-                    step="0.02"
-                    min="0.02"
-                    aria-label={`${rule.a}-${rule.b} radius`}
-                    value={rule.radius}
-                    onchange={(e) => setRuleNumber(i, 'radius', e.currentTarget.value)}
-                  /></td
-                >
-                <td class="colour">
+            <button
+              type="button"
+              class="small"
+              title="Forget this element's and its sites' overrides"
+              onclick={() => resetElement(node.element)}>↺</button
+            >
+          </div>
+          {#if node.sites.length > 0}
+            <ul>
+              {#each node.sites as site (site.label)}
+                <li class="row">
+                  <input
+                    type="checkbox"
+                    checked={site.visible}
+                    onchange={(e) => setSiteVisible(site.label, e.currentTarget.checked)}
+                    aria-label={`show site ${site.label}`}
+                  />
                   <input
                     type="color"
-                    aria-label={`${rule.a}-${rule.b} colour`}
-                    value={rule.color ?? '#9aa3b5'}
-                    oninput={(e) => (rule.color = e.currentTarget.value)}
+                    value={siteColourOf(site.label, node.element)}
+                    oninput={(e) => setSiteColour(site.label, e.currentTarget.value)}
+                    aria-label={`${site.label} colour`}
                   />
-                  <button
-                    type="button"
-                    class="small"
-                    title="Colour by the two atoms"
-                    disabled={!rule.color}
-                    onclick={() => (rule.color = undefined)}>auto</button
-                  >
-                </td>
-                <td
-                  ><input
-                    type="checkbox"
-                    aria-label={`${rule.a}-${rule.b} shown`}
-                    bind:checked={rule.visible}
-                  /></td
-                >
-                <td
-                  ><button
-                    type="button"
-                    class="small"
-                    aria-label={`remove ${rule.a}-${rule.b}`}
-                    onclick={() => settings.bonds.rules.splice(i, 1)}>×</button
-                  ></td
-                >
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-      <div class="row">
-        <select bind:value={pairA} aria-label="pair element 1">
-          {#each elements as el (el)}<option value={el}>{el}</option>{/each}
-        </select>
-        –
-        <select bind:value={pairB} aria-label="pair element 2">
-          {#each elements as el (el)}<option value={el}>{el}</option>{/each}
-        </select>
-        <button type="button" onclick={addRule} disabled={pairExists} data-testid="add-rule"
-          >Add pair</button
-        >
-        <button
-          type="button"
-          onclick={() => (settings.bonds.rules = defaultBondRules(crystal))}
-          title="Back to the bonds found from covalent radii">Reset rules</button
-        >
-      </div>
-      <div class="row stack">
-        <button type="button" onclick={drawBond} disabled={!twoSelected} data-testid="draw-bond"
-          >Draw bond between the 2 selected atoms</button
-        >
-        <button
-          type="button"
-          onclick={deleteBond}
-          disabled={!twoSelected || !(bondedNow || manualCount > 0)}
-          data-testid="delete-bond">Delete that bond</button
-        >
-        <button
-          type="button"
-          disabled={manualCount === 0}
-          onclick={() => (settings.bonds.manual = { add: [], remove: [] })}
-          >Clear {manualCount} manual change{manualCount === 1 ? '' : 's'}</button
-        >
-      </div>
-    {:else if tab === 'polyhedra'}
-      <p class="hint">Coordination polyhedra around the chosen elements, from their bonds.</p>
-      <div class="row wrap">
-        {#each elements as el (el)}
-          <label
-            ><input
-              type="checkbox"
-              checked={settings.polyhedra.centres.includes(el)}
-              onchange={(e) => toggleCentre(el, e.currentTarget.checked)}
-              data-testid={`poly-${el}`}
-            />
-            {el}</label
-          >
-        {/each}
-      </div>
-      <label class="row"
-        >opacity
-        <input
-          type="range"
-          min="0.05"
-          max="1"
-          step="0.05"
-          bind:value={settings.polyhedra.opacity}
-          aria-label="polyhedra opacity"
-        />
-        {settings.polyhedra.opacity.toFixed(2)}</label
+                  {site.label}
+                  <span class="hint">×{site.count}</span>
+                  <input
+                    class="n"
+                    type="number"
+                    step="0.05"
+                    min="0.05"
+                    placeholder="auto"
+                    aria-label={`${site.label} radius`}
+                    value={ap.sites[site.label]?.radius ?? ''}
+                    onchange={(e) => setSiteRadius(site.label, e.currentTarget.value)}
+                  />
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    <div class="row">
+      <button
+        type="button"
+        onclick={onHideSelected}
+        disabled={selection.length === 0}
+        data-testid="hide-selected">Hide {selection.length} selected</button
       >
-      <label class="row"
-        ><input type="checkbox" bind:checked={settings.polyhedra.edges} /> Draw edges</label
+      <button
+        type="button"
+        disabled={settings.hiddenAtoms.length === 0}
+        onclick={() => (settings.hiddenAtoms = [])}
+        data-testid="show-hidden">Show {settings.hiddenAtoms.length} hidden</button
       >
-      {#if settings.polyhedra.centres.length > 0}
-        <p class="hint" data-testid="poly-info">
-          {polyhedraInfo.count} drawn{polyhedraInfo.skipped
-            ? `, ${polyhedraInfo.skipped} skipped because some neighbours are not shown (try "Search bonds beyond the range")`
-            : ''}.
-        </p>
-      {/if}
-    {:else if tab === 'appearance'}
-      <label class="row"
-        >Atom radii
-        <select bind:value={ap.radiusScheme} aria-label="radius scheme" data-testid="scheme">
-          <option value="auto">automatic (by style)</option>
-          <option value="covalent">covalent</option>
-          <option value="ionic">ionic (Shannon)</option>
-          <option value="vdw">van der Waals</option>
-          <option value="uniform">uniform</option>
-        </select></label
-      >
-      <label class="row"
-        >scale
-        <input
-          type="range"
-          min="0.2"
-          max="2"
-          step="0.05"
-          bind:value={ap.radiusScale}
-          aria-label="radius scale"
-        />
-        {ap.radiusScale.toFixed(2)}</label
-      >
-      {#if ap.radiusScheme === 'uniform'}
-        <label class="row"
-          >uniform radius
-          <input
-            class="n"
-            type="number"
-            min="0.1"
-            step="0.05"
-            bind:value={ap.uniformRadius}
-            aria-label="uniform radius"
-          />
-          Å</label
-        >
-      {/if}
-      <label class="row"
-        >Background
-        <input
-          type="color"
-          bind:value={ap.background}
-          aria-label="background colour"
-          data-testid="background"
-        />
-        <button type="button" class="small" onclick={() => (ap.background = DEFAULT_BACKGROUND)}
-          >default</button
-        ></label
-      >
-      <label class="row"
-        >Atom labels
-        <select bind:value={ap.labels} aria-label="atom labels" data-testid="labels">
-          <option value="none">none</option>
-          <option value="element">element</option>
-          <option value="site">site label</option>
-        </select></label
-      >
-    {:else}
-      <p class="hint">Show, colour and size each element and site; hide selected atoms.</p>
-      <ul class="tree" data-testid="tree">
-        {#each tree as node (node.element)}
-          <li>
-            <div class="row">
-              <input
-                type="checkbox"
-                checked={node.visible}
-                onchange={(e) => setElementVisible(node.element, e.currentTarget.checked)}
-                aria-label={`show ${node.element}`}
-              />
-              <input
-                type="color"
-                value={colourOf(node.element)}
-                oninput={(e) => setElementColour(node.element, e.currentTarget.value)}
-                aria-label={`${node.element} colour`}
-              />
-              <strong>{node.element}</strong>
-              <input
-                class="n"
-                type="number"
-                step="0.05"
-                min="0.05"
-                placeholder="auto"
-                title="Radius in Å; empty for automatic"
-                aria-label={`${node.element} radius`}
-                value={ap.elements[node.element]?.radius ?? ''}
-                onchange={(e) => setElementRadius(node.element, e.currentTarget.value)}
-              />
-              <button
-                type="button"
-                class="small"
-                title="Forget this element's and its sites' overrides"
-                onclick={() => resetElement(node.element)}>↺</button
-              >
-            </div>
-            {#if node.sites.length > 0}
-              <ul>
-                {#each node.sites as site (site.label)}
-                  <li class="row">
-                    <input
-                      type="checkbox"
-                      checked={site.visible}
-                      onchange={(e) => setSiteVisible(site.label, e.currentTarget.checked)}
-                      aria-label={`show site ${site.label}`}
-                    />
-                    <input
-                      type="color"
-                      value={siteColourOf(site.label, node.element)}
-                      oninput={(e) => setSiteColour(site.label, e.currentTarget.value)}
-                      aria-label={`${site.label} colour`}
-                    />
-                    {site.label}
-                    <span class="hint">×{site.count}</span>
-                    <input
-                      class="n"
-                      type="number"
-                      step="0.05"
-                      min="0.05"
-                      placeholder="auto"
-                      aria-label={`${site.label} radius`}
-                      value={ap.sites[site.label]?.radius ?? ''}
-                      onchange={(e) => setSiteRadius(site.label, e.currentTarget.value)}
-                    />
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </li>
-        {/each}
-      </ul>
-      <div class="row">
-        <button
-          type="button"
-          onclick={onHideSelected}
-          disabled={selection.length === 0}
-          data-testid="hide-selected">Hide {selection.length} selected</button
-        >
-        <button
-          type="button"
-          disabled={settings.hiddenAtoms.length === 0}
-          onclick={() => (settings.hiddenAtoms = [])}
-          data-testid="show-hidden">Show {settings.hiddenAtoms.length} hidden</button
-        >
-      </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
   .panel {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    font-size: 0.82rem;
     min-width: 0;
-  }
-  .tabbar {
-    display: flex;
-    align-items: stretch;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-2);
-    border-radius: var(--radius) var(--radius) 0 0;
-  }
-  .tabs {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .tabs button {
-    flex: 1 0 auto;
-    padding: 0.55rem 0.6rem 0.5rem;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    background: none;
-    color: var(--text);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-  .tabs button:hover:not(:disabled) {
-    background: none;
-    color: var(--text-h);
-  }
-  .tabs button.active {
-    color: var(--accent-ink);
-    border-bottom-color: var(--accent);
-    font-weight: 600;
-  }
-  .collapse {
-    border: none;
-    border-left: 1px solid var(--border);
-    border-radius: 0 var(--radius) 0 0;
-    background: none;
-    padding: 0 0.7rem;
-    font-size: 1rem;
-    color: var(--muted);
-  }
-  .body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 0.6rem 0.85rem 0.85rem;
   }
   .row {
     display: flex;

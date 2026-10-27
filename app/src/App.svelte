@@ -5,12 +5,39 @@
   import Inspector from './Inspector.svelte';
   import LoadBar, { type Loaded } from './ui/LoadBar.svelte';
   import Logo from './ui/Logo.svelte';
+  import { defaultViewSettings, type ViewSettings } from './core/structure/settings';
 
   type Check = { state: 'pending' | 'ok' | 'error'; detail: string };
 
   let kernel = $state<Check>({ state: 'pending', detail: 'starting worker…' });
   let cores = $state<number | null>(null);
   let loaded = $state.raw<Loaded>({ crystal: null, fileName: '', warnings: [] });
+  // The Structure Viewer's settings, shared with the diffraction tab (colours, styles, bonds).
+  let viewSettings = $state<ViewSettings>(defaultViewSettings(null));
+
+  const TABS = [
+    { id: 'structure', label: 'Structure Viewer' },
+    { id: 'ed', label: 'Electron Diffraction' },
+    { id: 'xrd', label: 'Powder XRD' },
+  ] as const;
+  type TabId = (typeof TABS)[number]['id'];
+  let tab = $state<TabId>('structure');
+  // A tab is mounted the first time it is opened and then kept, hidden, so its view survives.
+  let opened = $state<Record<TabId, boolean>>({ structure: true, ed: false, xrd: false });
+
+  function select(id: TabId) {
+    tab = id;
+    opened[id] = true;
+  }
+
+  function onTabKey(e: KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const i = TABS.findIndex((t) => t.id === tab);
+    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+    select(next.id);
+    document.getElementById(`tab-${next.id}`)?.focus();
+  }
 
   onMount(async () => {
     try {
@@ -40,7 +67,7 @@
   <div class="brand">
     <Logo size={44} />
     <div>
-      <h1>{APP_NAME}</h1>
+      <h1 aria-label={APP_NAME}>Crystal Viewer<sup>Lite</sup></h1>
       <p class="tagline">Crystal structures and diffraction in the browser</p>
     </div>
   </div>
@@ -73,11 +100,63 @@
 <main>
   <LoadBar onLoad={(l) => (loaded = l)} />
 
-  {#await import('./ui/Viewer.svelte') then { default: Viewer }}
-    <Viewer crystal={loaded.crystal} />
-  {/await}
+  <div class="tabs" role="tablist" aria-label="Views">
+    {#each TABS as t (t.id)}
+      <button
+        type="button"
+        role="tab"
+        id={`tab-${t.id}`}
+        aria-selected={tab === t.id}
+        aria-controls={`panel-${t.id}`}
+        tabindex={tab === t.id ? 0 : -1}
+        onclick={() => select(t.id)}
+        onkeydown={onTabKey}
+        data-testid={`tab-${t.id}`}>{t.label}</button
+      >
+    {/each}
+  </div>
 
-  <Inspector crystal={loaded.crystal} fileName={loaded.fileName} warnings={loaded.warnings} />
+  <div
+    class="tabpanel"
+    role="tabpanel"
+    id="panel-structure"
+    aria-labelledby="tab-structure"
+    hidden={tab !== 'structure'}
+  >
+    {#await import('./ui/Viewer.svelte') then { default: Viewer }}
+      <Viewer crystal={loaded.crystal} fileName={loaded.fileName} bind:settings={viewSettings} />
+    {/await}
+
+    <Inspector crystal={loaded.crystal} fileName={loaded.fileName} warnings={loaded.warnings} />
+  </div>
+
+  <div
+    class="tabpanel"
+    role="tabpanel"
+    id="panel-ed"
+    aria-labelledby="tab-ed"
+    hidden={tab !== 'ed'}
+  >
+    {#if opened.ed}
+      {#await import('./ui/DiffractionTab.svelte') then { default: DiffractionTab }}
+        <DiffractionTab crystal={loaded.crystal} fileName={loaded.fileName} {viewSettings} />
+      {/await}
+    {/if}
+  </div>
+
+  <div
+    class="tabpanel"
+    role="tabpanel"
+    id="panel-xrd"
+    aria-labelledby="tab-xrd"
+    hidden={tab !== 'xrd'}
+  >
+    {#if opened.xrd}
+      {#await import('./ui/PowderTab.svelte') then { default: PowderTab }}
+        <PowderTab crystal={loaded.crystal} fileName={loaded.fileName} />
+      {/await}
+    {/if}
+  </div>
 </main>
 
 <style>
@@ -95,6 +174,14 @@
     display: flex;
     align-items: center;
     gap: 0.8rem;
+  }
+  h1 sup {
+    margin-left: 0.15em;
+    font-size: 0.5em;
+    font-weight: 600;
+    letter-spacing: 0;
+    vertical-align: super;
+    line-height: 0;
   }
   h1 {
     margin: 0;
@@ -180,6 +267,38 @@
     flex-direction: column;
     gap: 1rem;
     padding: 1rem 1.5rem 3rem;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: -0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs [role='tab'] {
+    margin-bottom: -1px;
+    padding: 0.45rem 1.1rem;
+    border: 1px solid transparent;
+    border-radius: 8px 8px 0 0;
+    background: none;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tabs [role='tab']:hover {
+    color: var(--text-h);
+  }
+  .tabs [role='tab'][aria-selected='true'] {
+    border-color: var(--border);
+    border-bottom-color: var(--bg);
+    background: var(--bg);
+    color: var(--accent-ink);
+  }
+  .tabpanel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .tabpanel[hidden] {
+    display: none;
   }
   @media (max-width: 40rem) {
     .top {
